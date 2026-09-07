@@ -141,6 +141,16 @@ function renderQuestion() {
     ? 'Your selection is within the accepted geographic tolerance.'
     : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
   feedback.replaceChildren(result, explanation);
+  // Siachen Glacier is a disputed geographic area without its own country flag.
+  if (session.country.properties.id !== 'KAS') {
+    const flag = document.createElement('img');
+    flag.className = 'country-flag';
+    flag.src = new URL(`./flags/${session.country.properties.id}.svg`, document.baseURI).href;
+    flag.alt = `Flag of ${session.country.properties.name}`;
+    flag.width = 64;
+    flag.height = 48;
+    feedback.prepend(flag);
+  }
   boundaries.eachLayer(layer => {
     const polygon = layer as L.Polygon & { feature: Country };
     if (polygon.feature.properties.id !== answer.countryId) return;

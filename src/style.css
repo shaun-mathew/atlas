@@ -40,6 +40,7 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 .selection-hint { margin-bottom: 14px; color: #c0cdd2; font: 11px/1.6 ui-monospace, monospace; overflow-wrap: anywhere; }
 .feedback { margin-bottom: 16px; padding-left: 13px; border-left: 2px solid var(--accent); }
 .feedback.incorrect { border-color: #e2a890; }
+.country-flag { display: block; width: 64px; height: 48px; margin-bottom: 12px; object-fit: contain; object-position: left center; }
 .feedback strong { display: block; margin: 2px 0 7px; font-size: 14px; font-weight: 600; }
 .feedback span { display: block; color: var(--muted); font-size: 11px; line-height: 1.7; }
 .local-note { margin: 12px 0 0; color: var(--muted); font-size: 10px; text-align: center; }
