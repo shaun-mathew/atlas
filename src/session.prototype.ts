@@ -1,5 +1,5 @@
-// THROWAWAY: two structurally different renderings of the same country session.
-// /?variant=A = Field Guide; /?variant=B = Map First. No persistence or production mutations.
+// THROWAWAY: three structurally different renderings of the same country session.
+// /?variant=A = Field Guide; B = Map First; C = Map Studio. No persistence or production mutations.
 import L from 'leaflet';
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 import { pointToPolygonDistance } from '@turf/point-to-polygon-distance';
@@ -8,7 +8,8 @@ import './shared.prototype.css';
 import { countries, type Country } from './geography';
 import { FieldGuidePrototype } from './field-guide.prototype';
 import { MapFirstPrototype } from './map-first.prototype';
-import { PrototypeSwitcher } from './switcher.prototype';
+import { MapStudioPrototype } from './map-studio.prototype';
+import { PrototypeSwitcher, prototypeDesigns, type PrototypeVariant } from './switcher.prototype';
 
 export interface PrototypeView {
   countryName: string;
@@ -21,7 +22,8 @@ export interface PrototypeView {
 }
 
 const practice = ['BRA', 'JPN', 'ITA', 'KEN', 'CAN'].map(id => countries.find(country => country.properties.id === id)!);
-let variant: 'A' | 'B' = new URL(location.href).searchParams.get('variant') === 'B' ? 'B' : 'A';
+const requestedVariant = new URL(location.href).searchParams.get('variant');
+let variant: PrototypeVariant = requestedVariant === 'B' || requestedVariant === 'C' ? requestedVariant : 'A';
 let questionIndex = 0;
 let answered = 0;
 let correct = 0;
@@ -59,8 +61,8 @@ function showSelection() {
   if (!selected || !map) return;
   marker?.remove();
   marker = L.circleMarker(selected, {
-    radius: 7, weight: 3, color: variant === 'A' ? '#fffdf4' : '#111f2c',
-    fillColor: feedback === 'incorrect' ? '#ea947b' : variant === 'A' ? '#b55236' : '#d6ef87',
+    radius: 7, weight: 3, color: variant === 'B' ? '#111f2c' : '#fffdf4',
+    fillColor: feedback === 'incorrect' ? '#ea947b' : variant === 'A' ? '#b55236' : variant === 'B' ? '#d6ef87' : '#2f58d8',
     fillOpacity: 1, interactive: false,
   }).addTo(map);
   app.querySelectorAll<HTMLElement>('[data-selection-hint]').forEach(hint => {
@@ -80,13 +82,18 @@ function render() {
     questionNumber: questionIndex + 1,
     answered, correct, selected: selected !== null, feedback,
   };
-  document.title = `${variant === 'A' ? 'Field Guide' : 'Map First'} · Atlas design prototype`;
+  document.title = `${prototypeDesigns[variant]} · Atlas design prototype`;
   document.documentElement.dataset.prototypeVariant = variant;
-  app.innerHTML = variant === 'A' ? FieldGuidePrototype(view) : MapFirstPrototype(view);
+  app.innerHTML = variant === 'A' ? FieldGuidePrototype(view) : variant === 'B' ? MapFirstPrototype(view) : MapStudioPrototype(view);
   const canvas = document.querySelector<HTMLElement>('#prototype-map')!;
   canvas.setAttribute('role', 'region');
   canvas.setAttribute('aria-label', 'Interactive world map');
   const dark = variant === 'B';
+  const palette = {
+    A: { grid: '#99b3ac', border: '#95a391', land: '#e5e5cc', highlight: '#7da27b', highlightBorder: '#296245' },
+    B: { grid: '#66869a', border: '#63777f', land: '#334c57', highlight: '#a2c472', highlightBorder: '#e3f5b1' },
+    C: { grid: '#9cb6d0', border: '#9cabc0', land: '#f5f6f0', highlight: '#8faef0', highlightBorder: '#2f58d8' },
+  }[variant];
   map = L.map(canvas, {
     minZoom: 1, maxZoom: 9, keyboard: false, doubleClickZoom: false,
     zoomAnimation: false, fadeAnimation: false, attributionControl: false,
@@ -94,23 +101,23 @@ function render() {
   }).setView(viewCenter ?? [12, 0], viewZoom ?? (canvas.clientWidth < 650 ? 1 : 2));
   L.control.zoom({ position: 'topright' }).addTo(map);
   for (let longitude = -180; longitude <= 180; longitude += 30) {
-    L.polyline([[-85, longitude], [85, longitude]], { color: dark ? '#66869a' : '#99b3ac', opacity: dark ? 0.12 : 0.24, weight: 1, interactive: false }).addTo(map);
+    L.polyline([[-85, longitude], [85, longitude]], { color: palette.grid, opacity: dark ? 0.12 : 0.24, weight: 1, interactive: false }).addTo(map);
   }
   for (let latitude = -60; latitude <= 60; latitude += 30) {
-    L.polyline([[latitude, -180], [latitude, 180]], { color: dark ? '#66869a' : '#99b3ac', opacity: dark ? 0.12 : 0.24, weight: 1, interactive: false }).addTo(map);
+    L.polyline([[latitude, -180], [latitude, 180]], { color: palette.grid, opacity: dark ? 0.12 : 0.24, weight: 1, interactive: false }).addTo(map);
   }
   const boundaries = L.geoJSON(countries, {
-    style: { color: dark ? '#63777f' : '#95a391', weight: 0.8, fillColor: dark ? '#334c57' : '#e5e5cc', fillOpacity: 1 },
+    style: { color: palette.border, weight: 0.8, fillColor: palette.land, fillOpacity: 1 },
   }).addTo(map);
   if (feedback) {
     boundaries.eachLayer(layer => {
       const polygon = layer as L.Polygon & { feature: Country };
       if (polygon.feature.properties.id !== country.properties.id) return;
-      polygon.setStyle({ color: dark ? '#e3f5b1' : '#296245', weight: 2, fillColor: dark ? '#a2c472' : '#7da27b' });
+      polygon.setStyle({ color: palette.highlightBorder, weight: 2, fillColor: palette.highlight });
       polygon.bringToFront();
       map!.fitBounds(polygon.getBounds(), {
-        paddingTopLeft: [30, dark ? 110 : 30],
-        paddingBottomRight: [30, dark ? 340 : 30],
+        paddingTopLeft: [dark && canvas.clientWidth > 700 ? 430 : 30, dark ? 110 : 30],
+        paddingBottomRight: [30, dark ? canvas.clientWidth > 700 ? 110 : 340 : 30],
         maxZoom: 4, animate: false,
       });
     });

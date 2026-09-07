@@ -1,0 +1,74 @@
+/* THROWAWAY C: a bright, top-command-bar workspace instead of floating UI. */
+.map-studio { --ms-ink: #20374f; --ms-blue: #2f58d8; display: grid; grid-template-rows: auto auto minmax(280px, 1fr) auto; height: 100dvh; min-height: 660px; color: var(--ms-ink); background: #f7f9fc; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+.ms-header { height: 76px; padding: 0 4%; display: flex; align-items: center; gap: 28px; background: #fff; border-bottom: 1px solid #e4e9f0; }
+.ms-brand { display: flex; align-items: center; gap: 10px; font-size: 23px; font-weight: 760; letter-spacing: -1.1px; }
+.ms-brand > svg { width: 28px; height: 28px; color: var(--ms-blue); }
+.ms-brand-dot { color: var(--ms-blue); }
+.ms-header-label { padding-left: 26px; border-left: 1px solid #dbe2ed; font-size: 12px; color: #8090a2; }
+.ms-guest { margin-left: auto; display: flex; align-items: center; gap: 7px; font-size: 11px; color: #78899a; }
+.ms-guest > span { width: 6px; height: 6px; border-radius: 50%; background: #7ba69e; }
+.ms-command { padding: 30px 4% 32px; display: flex; align-items: center; gap: 36px; justify-content: center; background: #fff; }
+.ms-eyebrow { margin: 0 0 10px; text-transform: uppercase; font-size: 10px; letter-spacing: 1.6px; font-weight: 650; color: #7a8ca0; }
+.ms-eyebrow span { padding: 0 8px; color: #b5c0cc; }
+.ms-question h1 { margin: 0; font-size: clamp(35px, 3.5vw, 54px); font-weight: 350; letter-spacing: -2px; line-height: 1.1; }
+.ms-question h1 strong { font-weight: 650; }
+.ms-heading-dot { color: var(--ms-blue); }
+.ms-answer-group { display: flex; align-items: center; gap: 24px; }
+.ms-answer-copy { max-width: 260px; }
+.ms-step-label { font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px; font-weight: 650; color: var(--ms-blue); }
+.ms-answer-copy p { margin: 7px 0 0; color: #7d8b9b; font-size: 12px; line-height: 1.5; }
+.ms-result p { color: var(--ms-ink); }
+.ms-primary { min-height: 50px; width: 190px; flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 0 18px; color: #fff; background: var(--ms-blue); border: 1px solid var(--ms-blue); border-radius: 8px; font-weight: 650; font-size: 12px; box-shadow: 0 3px 8px #2f58d819; }
+.ms-primary { order: -1; }
+.ms-primary svg { width: 20px; height: 20px; }
+.ms-primary:hover:not(:disabled) { background: #2348bb; }
+.ms-primary:disabled { color: #8396b5; background: #edf1fa; border-color: #dce4f4; box-shadow: none; }
+.ms-workspace { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; border-top: 1px solid #e1e8f0; }
+.ms-map-toolbar { min-height: 49px; padding: 0 4%; display: flex; align-items: center; justify-content: space-between; gap: 20px; background: #f7f9fc; }
+.ms-map-label { display: flex; align-items: center; gap: 8px; text-transform: uppercase; font-size: 9px; letter-spacing: 1.1px; font-weight: 600; color: #7b8c9c; }
+.ms-location-mark { width: 7px; height: 7px; border: 1px solid #7894b9; border-radius: 50%; box-shadow: 0 0 0 3px #e7edf6; margin-right: 3px; }
+.ms-world { display: flex; align-items: center; gap: 7px; padding: 6px 0 6px 8px; color: #577393; font-size: 11px; background: none; border: 0; white-space: nowrap; }
+.ms-world svg { width: 17px; height: 17px; }
+.ms-world:hover { color: var(--ms-blue); }
+.ms-map-area { position: relative; min-height: 0; overflow: hidden; background: #dce9f5; }
+.map-studio .ms-map { position: absolute; inset: 0; width: 100%; height: 100%; background: #dce9f5; }
+.ms-map-source { position: absolute; bottom: 12px; right: 4%; z-index: 500; font-size: 8px; letter-spacing: 1px; text-transform: uppercase; color: #7990a5; pointer-events: none; }
+.ms-map-footer { min-height: 46px; padding: 0 4%; display: flex; align-items: center; justify-content: space-between; gap: 16px; font-size: 10px; color: #8c9aab; border-top: 1px solid #d8e3ee; }
+.ms-map-footer p { margin: 0; }
+.ms-map-footer p strong { color: #526d8b; font-weight: 600; }
+.ms-map-footer p span { margin: 0 8px; }
+.ms-tolerance { padding-left: 14px; border-left: 1px solid #d9e3ee; white-space: nowrap; }
+.ms-prototype-space { height: calc(76px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid #e5eaf2; }
+.map-studio #prototype-map .leaflet-control-zoom { margin: 20px 28px 0 0; border-color: #c8d7e5; }
+.map-studio #prototype-map .leaflet-control-zoom a { background: #f8fbff; color: #41638a; border-color: #d8e3ef; }
+@media (max-width: 900px) {
+  .ms-answer-group { gap: 18px; }
+  .ms-answer-copy { max-width: 180px; }
+  .ms-primary { width: 167px; }
+  .ms-header-label { display: none; }
+}
+@media (max-width: 700px) {
+  .map-studio { min-height: 660px; grid-template-rows: auto auto minmax(270px, 1fr) auto; }
+  .ms-header { height: 62px; padding: 0 20px; }
+  .ms-brand { font-size: 22px; }
+  .ms-brand > svg { width: 26px; height: 26px; }
+  .ms-guest { font-size: 10px; }
+  .ms-command { display: block; padding: 22px 20px 20px; }
+  .ms-eyebrow { font-size: 8px; letter-spacing: 1.2px; margin-bottom: 8px; }
+  .ms-question h1 { font-size: 36px; letter-spacing: -1.5px; }
+  .ms-answer-group { margin-top: 18px; justify-content: space-between; gap: 14px; }
+  .ms-answer-copy { max-width: 175px; }
+  .ms-step-label { font-size: 8px; letter-spacing: 1px; }
+  .ms-answer-copy p { font-size: 10px; margin-top: 5px; }
+  .ms-primary { order: 0; width: 151px; min-height: 46px; padding: 0 12px; font-size: 11px; }
+  .ms-primary svg { width: 18px; }
+  .ms-map-toolbar { min-height: 43px; padding: 0 20px; gap: 12px; }
+  .ms-map-label { font-size: 8px; letter-spacing: 0.6px; }
+  .ms-world { font-size: 10px; }
+  .ms-map-footer { min-height: 40px; padding: 0 20px; font-size: 9px; gap: 10px; }
+  .ms-map-tip { display: none; }
+  .ms-map-footer p span { margin: 0 5px; }
+  .ms-tolerance { padding-left: 10px; }
+  .ms-map-source { right: 20px; font-size: 7px; }
+  .map-studio #prototype-map .leaflet-control-zoom { margin: 12px 12px 0 0; }
+}

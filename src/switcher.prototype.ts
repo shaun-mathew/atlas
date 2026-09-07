@@ -1,5 +1,9 @@
-// THROWAWAY prototype chrome, shared by both renderings on the existing / route.
-export function PrototypeSwitcher(current: 'A' | 'B', onSwitch: (variant: 'A' | 'B') => void) {
+// THROWAWAY prototype chrome, shared by all renderings on the existing / route.
+export const prototypeDesigns = { A: 'Field Guide', B: 'Map First', C: 'Map Studio' } as const;
+export type PrototypeVariant = keyof typeof prototypeDesigns;
+
+export function PrototypeSwitcher(current: PrototypeVariant, onSwitch: (variant: PrototypeVariant) => void) {
+  const variants = Object.keys(prototypeDesigns) as PrototypeVariant[];
   const tools = document.createElement('aside');
   tools.className = 'prototype-tools';
   tools.setAttribute('aria-label', 'Prototype design switcher');
@@ -13,26 +17,28 @@ export function PrototypeSwitcher(current: 'A' | 'B', onSwitch: (variant: 'A' | 
   const label = tools.querySelector<HTMLDivElement>('.prototype-design')!;
   const state = tools.querySelector('pre')!;
 
-  function switchDesign() {
-    current = current === 'A' ? 'B' : 'A';
+  function switchDesign(direction: number) {
+    current = variants[(variants.indexOf(current) + direction + variants.length) % variants.length];
     const url = new URL(location.href);
     url.searchParams.set('variant', current);
     history.replaceState(null, '', url);
     onSwitch(current);
   }
-  tools.querySelectorAll('button').forEach(button => button.addEventListener('click', switchDesign));
+  tools.querySelectorAll<HTMLButtonElement>('button').forEach(button => {
+    button.addEventListener('click', () => switchDesign(button.dataset.direction === 'previous' ? -1 : 1));
+  });
   document.addEventListener('keydown', event => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     if (event.ctrlKey || event.metaKey || event.altKey) return;
     if ((event.target as HTMLElement).closest('input, textarea, select, [contenteditable]')) return;
     event.preventDefault();
-    switchDesign();
+    switchDesign(event.key === 'ArrowLeft' ? -1 : 1);
   });
 
   return {
-    update(variant: 'A' | 'B', snapshot: object) {
+    update(variant: PrototypeVariant, snapshot: object) {
       current = variant;
-      label.textContent = variant === 'A' ? 'A · Field Guide' : 'B · Map First';
+      label.textContent = `${variant} · ${prototypeDesigns[variant]}`;
       state.textContent = JSON.stringify(snapshot, null, 2);
     },
   };
