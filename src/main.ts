@@ -14,7 +14,7 @@ app.innerHTML = `
       <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="13" stroke="currentColor" stroke-width="1.2"/><path d="m21 10-3 9-8 3 3-9 8-3Z" stroke="currentColor" stroke-width="1.2"/><path d="m21 10-8 3 5 6 3-9Z" fill="currentColor"/></svg>
       <span>Atlas<span class="brand-subtitle">A little further, every day.</span></span>
     </a>
-    <div class="map-actions"><button id="reset-map" class="secondary" type="button"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg>World view</button><button id="map-info" class="secondary info-button" type="button" aria-label="Map coverage and tolerance">i</button></div>
+    <div class="map-actions"><button id="reset-map" class="secondary" type="button"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg>World view</button><button id="map-info" class="secondary info-button" type="button" aria-label="Map coverage and review policy">i</button></div>
   </header>
   <p id="progress" class="progress" aria-label="Practice results"><span id="answered-count">0</span> answered <span class="progress-divider">·</span> <span id="correct-count">0</span> correct</p>
   <div class="session-panel">
@@ -25,27 +25,43 @@ app.innerHTML = `
       <div class="answer-dock"><button id="start" class="primary" type="button">Start country session <span aria-hidden="true">→</span></button><p class="local-note">Your progress stays in this browser.</p></div>
     </section>
     <section id="session" hidden>
-      <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> Country practice <span id="question-number"></span></p>
+      <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> <span id="question-kind">New learning item</span> <span id="question-number"></span></p>
       <p class="prompt">Where is</p>
       <h1><span id="country"></span><span class="accent">?</span></h1>
       <p class="instructions">Find it. Drop a pin. Trust your bearings.</p>
       <div class="answer-dock">
         <div id="feedback" role="status" aria-live="polite"></div>
+        <section id="proficiency" aria-label="Name-to-location proficiency" hidden>
+          <p>Name-to-location · <strong id="proficiency-level"></strong></p>
+          <p>Review due <time id="review-at"></time></p>
+          <p id="retry-note" hidden>Immediate retry records practice, not retention; your review time stays unchanged.</p>
+        </section>
         <section id="country-fact-card" class="fact-card" aria-label="Country fact card" tabindex="0" hidden></section>
         <button id="check" class="primary" type="button" disabled>Check location <span aria-hidden="true">→</span></button>
         <button id="next" class="primary" type="button" hidden>Next learning item <span aria-hidden="true">→</span></button>
+        <button id="retry" class="secondary" type="button" hidden>Retry now</button>
       </div>
+    </section>
+    <section id="review-wait" hidden>
+      <p class="eyebrow">Country practice</p>
+      <h1>All caught up<span class="accent">.</span></h1>
+      <p class="instructions">Next review: <time id="next-review-at"></time></p>
+      <div class="answer-dock"><button id="check-reviews" class="primary" type="button">Check due reviews</button></div>
     </section>
     <p id="storage-notice" role="alert" hidden></p>
   </div>
   <span class="map-caption" aria-hidden="true">A world worth knowing</span>
   <dialog id="geography-policy" aria-labelledby="policy-title">
     <button id="close-policy" class="secondary" type="button">Close</button>
-    <h2 id="policy-title">Map coverage & geographic tolerance</h2>
+    <h2 id="policy-title">Map coverage & review policy</h2>
     <p>Points inside the target boundary or within 25 km are accepted, unless they fall inside another mapped country or territory.</p>
     <p>241 countries and territories, excluding Antarctica. Public-domain <a href="https://www.naturalearthdata.com/about/terms-of-use/">Natural Earth</a> 5.1.2, 1:50m Admin-0 boundaries, retrieved 7 September 2026.</p>
     <p>We use its de facto boundaries and mapped territories; inclusion does not imply political recognition. Small islands and borders are generalized. This is a fixed learning dataset, not a source of legal boundaries.</p>
     <p>Drag to explore, use + and − to zoom, and select a point before checking your answer. Guest progress is saved in this browser, not across devices. Clearing browser data removes that progress.</p>
+    <h3>Name-to-location reviews</h3>
+    <p>Proficiency belongs to each country’s name-to-location skill, not to its capitals, facts, or other skills. A miss means Learning and schedules a review in 10 minutes. A first success means Familiar and schedules a review in 1 day.</p>
+    <p>Successful scheduled reviews extend the interval to 3, 7, 14, then 30 days (the maximum), and mark the skill Retained. A success after a miss restarts at Familiar and 1 day. Any missed review resets it to Learning and 10 minutes.</p>
+    <p>Retry now repeats the revealed learning item immediately. Retry answers count as practice, but do not change retention proficiency or postpone the scheduled review. Due reviews are selected oldest first, before unseen countries. When nothing is due and all countries have been introduced, practice waits for the next review. Review dates use your local time.</p>
   </dialog>`;
 
 const session = new GuestSession();
@@ -56,8 +72,13 @@ const feedback = document.querySelector<HTMLDivElement>('#feedback')!;
 const factCard = document.querySelector<HTMLElement>('#country-fact-card')!;
 const check = document.querySelector<HTMLButtonElement>('#check')!;
 const next = document.querySelector<HTMLButtonElement>('#next')!;
+const retry = document.querySelector<HTMLButtonElement>('#retry')!;
 const storageNotice = document.querySelector<HTMLParagraphElement>('#storage-notice')!;
 const policy = document.querySelector<HTMLDialogElement>('#geography-policy')!;
+const proficiency = document.querySelector<HTMLElement>('#proficiency')!;
+const reviewAt = document.querySelector<HTMLTimeElement>('#review-at')!;
+const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+const questionLabels = { new: 'New learning item', review: 'Scheduled review', retry: 'Immediate retry' };
 let pendingPoint: L.LatLng | null = null;
 let marker: L.CircleMarker | undefined;
 let answerPolygon: L.Polygon | undefined;
@@ -172,8 +193,11 @@ function renderFactCard(countryId: string, version: string) {
 
 function renderQuestion() {
   document.querySelector<HTMLElement>('#welcome')!.hidden = session.started;
-  document.querySelector<HTMLElement>('#session')!.hidden = !session.started;
-  document.querySelector('#country')!.textContent = session.country.properties.name;
+  const country = session.country;
+  document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
+  document.querySelector<HTMLElement>('#review-wait')!.hidden = !session.started || !!country;
+  document.querySelector('#country')!.textContent = country?.properties.name ?? '';
+  document.querySelector('#question-kind')!.textContent = session.questionKind ? questionLabels[session.questionKind] : '';
   document.querySelector('#question-number')!.textContent = `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
   document.querySelector('#answered-count')!.textContent = String(session.attempts.length);
   document.querySelector('#correct-count')!.textContent = String(session.attempts.filter(attempt => attempt.correct).length);
@@ -189,8 +213,25 @@ function renderQuestion() {
   factCard.hidden = true;
   factCard.replaceChildren();
   next.hidden = !answer;
+  retry.hidden = !answer || answer.correct;
+  document.querySelector<HTMLElement>('#retry-note')!.hidden = session.questionKind !== 'retry';
   check.hidden = !!answer;
   check.disabled = true;
+  const itemProficiency = session.proficiency;
+  proficiency.hidden = !itemProficiency;
+  if (itemProficiency) {
+    document.querySelector('#proficiency-level')!.textContent = itemProficiency.level;
+    reviewAt.dateTime = itemProficiency.dueAt;
+    reviewAt.textContent = dateFormatter.format(new Date(itemProficiency.dueAt));
+  }
+  if (!country) {
+    const dueAt = session.nextReviewAt;
+    const nextReview = document.querySelector<HTMLTimeElement>('#next-review-at')!;
+    nextReview.dateTime = dueAt ?? '';
+    nextReview.textContent = dueAt ? dateFormatter.format(new Date(dueAt)) : '';
+    map.setView([15, 0], app.clientWidth <= 700 ? 1 : 2, { animate: false });
+    return;
+  }
   feedback.className = 'selection-hint';
   if (!answer) {
     feedback.textContent = 'Tap the map to place your pin.';
@@ -198,20 +239,20 @@ function renderQuestion() {
     return;
   }
   feedback.className = `feedback ${answer.correct ? 'correct' : 'incorrect'}`;
-  renderFactCard(session.country.properties.id, answer.factVersion);
+  renderFactCard(country.properties.id, answer.factVersion);
   const result = document.createElement('strong');
   result.textContent = answer.correct ? 'Correct — well placed.' : 'Not quite — take another look.';
   const explanation = document.createElement('span');
-  explanation.textContent = `${session.country.properties.name} is highlighted on the map. ${answer.correct
+  explanation.textContent = `${country.properties.name} is highlighted on the map. ${answer.correct
     ? 'Your selection is within the accepted geographic tolerance.'
     : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
   feedback.replaceChildren(result, explanation);
   // Siachen Glacier is a disputed geographic area without its own country flag.
-  if (session.country.properties.id !== 'KAS') {
+  if (country.properties.id !== 'KAS') {
     const flag = document.createElement('img');
     flag.className = 'country-flag';
-    flag.src = new URL(`./flags/${session.country.properties.id}.svg`, document.baseURI).href;
-    flag.alt = `Flag of ${session.country.properties.name}`;
+    flag.src = new URL(`./flags/${country.properties.id}.svg`, document.baseURI).href;
+    flag.alt = `Flag of ${country.properties.name}`;
     flag.width = 64;
     flag.height = 48;
     feedback.prepend(flag);
@@ -230,7 +271,7 @@ function renderQuestion() {
 }
 
 map.on('click', (event: L.LeafletMouseEvent) => {
-  if (!session.started || session.feedback || Math.abs(event.latlng.lng) > 180 || Math.abs(event.latlng.lat) > 85) return;
+  if (!session.started || !session.country || session.feedback || Math.abs(event.latlng.lng) > 180 || Math.abs(event.latlng.lat) > 85) return;
   pendingPoint = event.latlng;
   if (marker) marker.setLatLng(pendingPoint);
   else marker = L.circleMarker(pendingPoint, { radius: 7, weight: 3, color: '#111f2c', fillColor: '#d6ef87', fillOpacity: 1, interactive: false }).addTo(map);
@@ -247,6 +288,14 @@ check.addEventListener('click', () => {
   renderQuestion();
 });
 next.addEventListener('click', () => {
+  session.next();
+  renderQuestion();
+});
+retry.addEventListener('click', () => {
+  session.retry();
+  renderQuestion();
+});
+document.querySelector('#check-reviews')!.addEventListener('click', () => {
   session.next();
   renderQuestion();
 });
