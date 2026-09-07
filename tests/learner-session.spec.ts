@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import countryData from '../src/data/countries.json' with { type: 'json' };
+import { answerWorldPoint, selectWorldPoint } from './map-interaction';
 
 async function seedQuestion(page: Page, countryId: string) {
   await page.addInitScript(id => {
@@ -285,20 +286,6 @@ test('a v3 adaptive save resumes an eligible weak revisit and preserves its hist
   await expect(page.getByText('6 answered · 3 correct', { exact: true })).toBeVisible();
 });
 
-// Select a geographic point through the rendered map, not an application back door.
-// The initial world view uses the standard Web Mercator projection at zoom 2.
-async function selectWorldPoint(page: Page, longitude: number, latitude: number) {
-  const box = (await page.getByRole('region', { name: 'World map' }).boundingBox())!;
-  const mercatorY = (lat: number) => (1 - Math.asinh(Math.tan(lat * Math.PI / 180)) / Math.PI) * 512;
-  const x = (longitude + 180) / 360 * 1024 - Math.round(512 - box.width / 2);
-  const y = mercatorY(latitude) - Math.round(mercatorY(15) - box.height / 2);
-  await page.mouse.click(box.x + x, box.y + y);
-}
-
-async function answerWorldPoint(page: Page, longitude: number, latitude: number) {
-  await selectWorldPoint(page, longitude, latitude);
-  await page.getByRole('button', { name: 'Check location' }).click();
-}
 
 test('an answered country reveals sourced facts without assessing population', async ({ page }) => {
   await seedQuestion(page, 'AFG');

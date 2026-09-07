@@ -3,6 +3,7 @@ import { pointToPolygonDistance } from '@turf/point-to-polygon-distance';
 import { z } from 'zod';
 import { countries, introductionOrder } from './geography';
 import { factVersion } from './facts';
+import { facetSelectionSchema, matchesFacets, type FacetSelection } from './facets';
 
 const countriesById = new Map(countries.map(country => [country.properties.id, country]));
 const countryIdSchema = z.string().refine(id => countriesById.has(id));
@@ -36,7 +37,10 @@ const questionSchema = z.object({
   assisted: z.boolean().default(false),
 });
 const progressSchema = z.object({
-  version: z.literal(5),
+  version: z.literal(6),
+  selection: facetSelectionSchema.nullable().default(null),
+  readingCountryId: countryIdSchema.nullable().default(null),
+  pausedQuestions: z.array(questionSchema).default([]),
   started: z.boolean(),
   cursor: z.number().int().nonnegative(),
   current: questionSchema.nullable(),
@@ -45,6 +49,10 @@ const progressSchema = z.object({
   const answer = state.attempts[state.cursor];
   return (state.attempts.length === state.cursor || state.attempts.length === state.cursor + 1)
     && (state.started || (state.cursor === 0 && state.attempts.length === 0))
+    && new Set(state.pausedQuestions.map(question => question.countryId)).size === state.pausedQuestions.length
+    && state.pausedQuestions.every(question => question.countryId !== state.current?.countryId)
+    && (state.selection?.learning !== 'country-facts'
+      || (state.readingCountryId !== null && matchesFacets(countriesById.get(state.readingCountryId)!, state.selection)))
     && (!answer || (answer.countryId === state.current?.countryId && answer.kind === state.current.kind));
 });
 
@@ -53,10 +61,10 @@ const previousKindSchema = questionKindSchema.or(z.literal('diagnostic'))
   .transform(kind => kind === 'diagnostic' ? 'new' as const : kind);
 const previousProgressSchema = z.object({
   ...progressSchema.shape,
-  version: z.union([z.literal(2), z.literal(3), z.literal(4)]),
+  version: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5)]),
   current: questionSchema.extend({ kind: previousKindSchema }).nullable(),
   attempts: z.array(attemptSchema.extend({ kind: previousKindSchema })),
-}).transform(state => progressSchema.parse({ ...state, version: 5 }));
+}).transform(state => progressSchema.parse({ ...state, version: 6 }));
 
 type Attempt = z.infer<typeof progressSchema>['attempts'][number];
 type Proficiency = {
@@ -69,7 +77,7 @@ const day = 24 * 60 * 60 * 1000;
 
 function initialState(): z.infer<typeof progressSchema> {
   return {
-    version: 5, started: false, cursor: 0, attempts: [],
+    version: 6, selection: null, readingCountryId: null, pausedQuestions: [], started: false, cursor: 0, attempts: [],
     current: { countryId: introductionOrder[0].properties.id, kind: 'new', assisted: false },
   };
 }
@@ -91,7 +99,7 @@ export class GuestSession {
       if (parsed.version === 1) {
         const legacy = legacyProgressSchema.parse(parsed);
         this.state = {
-          ...legacy, version: 5,
+          ...initialState(), ...legacy, version: 6,
           current: {
             countryId: countries[legacy.cursor % countries.length].properties.id,
             kind: 'new',
@@ -99,7 +107,7 @@ export class GuestSession {
           },
           attempts: legacy.attempts.map(attempt => ({ ...attempt, kind: 'new' as const })),
         };
-      } else if (parsed.version === 2 || parsed.version === 3 || parsed.version === 4) {
+      } else if ([2, 3, 4, 5].includes(parsed.version)) {
         this.state = previousProgressSchema.parse(parsed);
       } else {
         this.state = progressSchema.parse(parsed);
@@ -107,8 +115,9 @@ export class GuestSession {
       if (!this.started) this.state = initialState();
       this.attempts.forEach((attempt, index) => this.recordAttempt(attempt, index));
       const waiting = this.started && !this.state.current;
-      if (waiting) this.state.current = this.selectAdaptive(new Date().toISOString());
-      if (waiting || parsed.version !== 5) this.save();
+      if (waiting) this.state.current = this.selectQuestion(new Date().toISOString());
+      const revealedQuestion = this.readingFacts && this.selectFactCountry(this.state.readingCountryId!);
+      if (waiting || parsed.version !== 6 || revealedQuestion) this.save();
     } catch {
       this.storageNotice = 'Saved guest progress could not be read. Starting a session will replace any unreadable save. Browser storage must be available to retain new progress.';
     }
@@ -117,11 +126,47 @@ export class GuestSession {
   get started() { return this.state.started; }
   get cursor() { return this.state.cursor; }
   get attempts() { return this.state.attempts; }
-  get questionKind() { return this.state.current?.kind; }
-  get assisted() { return this.state.current?.assisted ?? false; }
-  get country() { return this.state.current ? countriesById.get(this.state.current.countryId)! : null; }
-  get feedback() { return this.attempts[this.cursor]; }
-  get proficiency() { return this.state.current ? this.learningItems.get(`${this.state.current.countryId}:name-to-location`) : undefined; }
+  get readingFacts() { return this.selection?.learning === 'country-facts'; }
+  get questionKind() { return this.readingFacts ? undefined : this.state.current?.kind; }
+  get assisted() { return !this.readingFacts && (this.state.current?.assisted ?? false); }
+  get country() {
+    const id = this.readingFacts ? this.state.readingCountryId : this.state.current?.countryId;
+    return id ? countriesById.get(id)! : null;
+  }
+  get feedback() { return this.readingFacts ? undefined : this.attempts[this.cursor]; }
+  get proficiency() {
+    return !this.readingFacts && this.state.current ? this.learningItems.get(`${this.state.current.countryId}:name-to-location`) : undefined;
+  }
+  get selection() { return this.state.selection; }
+
+  choosePractice(selection: FacetSelection | null) {
+    const nextSelection = selection === null ? null : facetSelectionSchema.parse(selection);
+    if (this.started && nextSelection?.continent === this.selection?.continent
+      && nextSelection?.region === this.selection?.region && nextSelection?.learning === this.selection?.learning) return;
+    this.state.selection = nextSelection;
+    if (this.readingFacts) {
+      this.selectFactCountry(introductionOrder.find(country => matchesFacets(country, this.selection!))!.properties.id);
+    } else {
+      // Keep unanswered prompts (including revealed location help) until that
+      // country is selected again. Switching scope must not turn help into recall.
+      if (this.started && this.state.current && !this.attempts[this.cursor]) this.state.pausedQuestions.push(this.state.current);
+      this.state.readingCountryId = null;
+      this.state.cursor = this.attempts.length;
+      this.state.current = this.selectQuestion(new Date().toISOString());
+    }
+    this.start();
+  }
+
+  private selectFactCountry(countryId: string): boolean {
+    this.state.readingCountryId = countryId;
+    // The reading map reveals location just like linked-map help. Preserve that
+    // exposure on an unanswered prompt without recording an attempt or review.
+    const pending = this.state.current?.countryId === countryId && !this.attempts[this.cursor]
+      ? this.state.current : this.state.pausedQuestions.find(question => question.countryId === countryId);
+    if (!pending || pending.assisted) return false;
+    pending.assisted = true;
+    return true;
+  }
 
   reset(): boolean {
     const fresh = initialState();
@@ -142,13 +187,13 @@ export class GuestSession {
 
   start() {
     this.state.started = true;
-    if (!this.state.current) this.state.current = this.selectAdaptive(new Date().toISOString());
+    if (!this.state.current) this.state.current = this.selectQuestion(new Date().toISOString());
     this.save();
   }
 
 
   requestLocationHelp() {
-    if (!this.started || !this.state.current || this.feedback || this.assisted) return;
+    if (!this.started || this.readingFacts || !this.state.current || this.feedback || this.assisted) return;
     this.state.current.assisted = true;
     this.save();
   }
@@ -198,7 +243,7 @@ export class GuestSession {
 
   answer(longitude: number, latitude: number) {
     const country = this.country;
-    if (!this.started || !country || this.feedback || !Number.isFinite(longitude) || !Number.isFinite(latitude)
+    if (!this.started || this.readingFacts || !country || this.feedback || !Number.isFinite(longitude) || !Number.isFinite(latitude)
       || Math.abs(longitude) > 180 || Math.abs(latitude) > 90) return;
     const point = [longitude, latitude];
     const inside = booleanPointInPolygon(point, country);
@@ -227,6 +272,12 @@ export class GuestSession {
     this.save();
   }
 
+  private selectQuestion(now: string) {
+    const selected = this.selectAdaptive(now);
+    const index = this.state.pausedQuestions.findIndex(question => question.countryId === selected.countryId);
+    return index < 0 ? selected : this.state.pausedQuestions.splice(index, 1)[0];
+  }
+
   private selectAdaptive(now: string) {
     let dueCountryId: string | undefined;
     let earliestDueAt: string | undefined;
@@ -235,6 +286,7 @@ export class GuestSession {
     let oldestCountryId: string | undefined;
     let oldestSeenIndex = Infinity;
     for (const country of countries) {
+      if (this.selection && !matchesFacets(country, this.selection)) continue;
       const countryId = country.properties.id;
       const item = this.learningItems.get(`${countryId}:name-to-location`);
       if (item && item.dueAt <= now && (!earliestDueAt || item.dueAt < earliestDueAt)) {
@@ -255,7 +307,8 @@ export class GuestSession {
       }
     }
     if (dueCountryId) return { countryId: dueCountryId, kind: 'review' as const, assisted: false };
-    const unseenCountryId = introductionOrder.find(country => !this.selectionHistory.has(country.properties.id))?.properties.id;
+    const unseenCountryId = introductionOrder.find(country =>
+      (!this.selection || matchesFacets(country, this.selection)) && !this.selectionHistory.has(country.properties.id))?.properties.id;
     if (revisitCountryId && (this.introductionsSinceRevisit >= 2 || !unseenCountryId)) {
       return { countryId: revisitCountryId, kind: 'practice' as const, assisted: false };
     }
@@ -265,9 +318,16 @@ export class GuestSession {
   }
 
   next() {
+    if (this.started && this.readingFacts) {
+      const places = introductionOrder.filter(country => matchesFacets(country, this.selection!));
+      const index = places.findIndex(country => country.properties.id === this.state.readingCountryId);
+      this.selectFactCountry(places[(index + 1) % places.length].properties.id);
+      this.save();
+      return;
+    }
     if (!this.started || (this.state.current && !this.feedback)) return;
     this.state.cursor = this.attempts.length;
-    this.state.current = this.selectAdaptive(new Date().toISOString());
+    this.state.current = this.selectQuestion(new Date().toISOString());
     this.save();
   }
 }

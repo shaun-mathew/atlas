@@ -2,10 +2,12 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 import { countries, type Country } from './geography';
-import { getCountryFacts } from './facts';
+import { factVersion, getCountryFacts } from './facts';
 import { GuestSession } from './session';
 import { LinkedMaps } from './linked-maps';
 import { Globe } from './globe';
+import { createFacetSetup } from './facet-setup';
+import { describeFacets } from './facets';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
@@ -40,8 +42,16 @@ app.innerHTML = `
       <button id="open-profile" class="secondary profile-button" type="button" aria-label="Profile" title="Guest profile"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M4 17v-2a6 6 0 0 1 12 0v2" stroke="currentColor" stroke-width="1.5"/></svg></button>
     </div>
   </header>
+  <nav class="learning-modes" aria-label="Learning mode">
+    <button id="adaptive-mode" class="secondary" type="button" aria-pressed="true">Adaptive mode</button>
+    <button id="facet-mode" class="secondary" type="button" aria-pressed="false">Facet mode</button>
+  </nav>
   <p id="progress" class="progress" aria-label="Practice results"><span id="answered-count">0</span> answered <span class="progress-divider">·</span> <span id="correct-count">0</span> correct<span id="guided-count" hidden></span></p>
   <div class="session-panel">
+    <section id="current-facets" class="current-facets" aria-label="Current practice selection" hidden>
+      <p id="current-facet-description"></p>
+      <button id="edit-facets" class="secondary" type="button">Edit practice set</button>
+    </section>
     <section id="welcome">
       <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> Guest practice</p>
       <h1>A world worth knowing<span class="accent">.</span></h1>
@@ -100,6 +110,12 @@ app.innerHTML = `
     <h3>Adaptive practice</h3>
     <p>Practice starts directly and adapts as you answer. Due reviews are selected oldest first. Otherwise, new countries are mixed with practice revisits: after two new introductions, an eligible previously seen country is selected, favoring its latest missed or guided answer, then the country least recently answered. Revisits normally have at least two intervening answers; new countries fill the gap while no revisit is eligible. Once every country has been introduced, practice continues with revisits. Stop whenever you like and resume from your saved question.</p>
     <p>Practice revisits reinforce countries before their scheduled review. Their answers affect revisit selection, but do not change retention proficiency or review dates. Immediate retries also leave retention unchanged, and do not erase a miss when selecting future revisits. There are no batch limits or waiting screens.</p>
+    <h3>Facet mode and geographic filters</h3>
+    <p>Facet mode guides you through Places, Geography, and Learning. Choose Countries & territories, a continent or region, and an available learning facet. Your practice selection stays visible above the question. Edit practice set reopens the setup; Cancel or Escape leaves the active session unchanged. Selections and the current item resume when you reload.</p>
+    <p>Name-to-location practice uses the same answers, proficiency, review dates, and country progression as adaptive mode, restricted to your chosen places. Due reviews inside the selection come first; reviews outside it remain scheduled. Returning to Adaptive mode includes all countries again. Unanswered questions keep their original kind and any location help when their country is selected again, even after switching sets or reloading.</p>
+    <p>Country fact cards is a reading facet: browse the existing sourced, versioned facts for your selected countries with Next fact card. Reading is informational, not an assessed skill; it records no answers and does not advance proficiency or reschedule reviews. Population remains informational. Switching to reading does not discard the pending spatial question.</p>
+    <p>The reading map reveals the displayed country’s location. If that country has an unanswered spatial question, the question keeps this exposure as location help, including while it is paused outside the active practice set. Reading alone still changes no proficiency or review dates; the eventual answer follows the guided-practice policy.</p>
+    <p>Continental groups use each place’s Natural Earth region, including transcontinental countries. Worldwide includes all 241 mapped places; Open ocean keeps territories outside continental groups accessible. Choosing another continent resets the region to All regions. In a small practice set, revisits may occur sooner once every place in that set has been introduced, without advancing retention before a scheduled review.</p>
     <h3>Linked-map location help</h3>
     <p>Show linked maps reveals the country in a regional overview and a separate close-up. Clicking the overview moves the close-up; dragging or zooming the close-up moves its outlined window without moving the overview. Select a location in the close-up and use Check location as usual.</p>
     <p>Using location help before answering marks that question as guided practice, even if you close the maps or reload. Guided answers are recorded separately from the correct-answer total and do not earn retention credit. On new items and scheduled reviews, they return the skill to Learning with an unassisted check in 10 minutes. Practice revisits and immediate retries leave the existing review schedule unchanged. Exploring linked maps after an answer does not change its recorded result or review schedule.</p>
@@ -296,6 +312,13 @@ function renderFactCard(countryId: string, version: string) {
 }
 
 function renderQuestion() {
+  const reading = session.readingFacts;
+  app.classList.toggle('is-reading', reading);
+  const selectedFacets = session.selection;
+  document.querySelector<HTMLElement>('#current-facets')!.hidden = !selectedFacets;
+  document.querySelector('#current-facet-description')!.textContent = selectedFacets ? describeFacets(selectedFacets) : '';
+  document.querySelector('#adaptive-mode')!.setAttribute('aria-pressed', String(!selectedFacets));
+  document.querySelector('#facet-mode')!.setAttribute('aria-pressed', String(!!selectedFacets));
   document.querySelector<HTMLElement>('#welcome')!.hidden = session.started;
   const country = session.country;
   const answer = session.feedback;
@@ -306,8 +329,8 @@ function renderQuestion() {
   globeButton.setAttribute('aria-pressed', String(globeOpen));
   mapButton.setAttribute('aria-pressed', String(!globeOpen));
   globe?.setVisible(globeOpen);
-  globe?.showAnswer(answer ? country ?? undefined : undefined, answer ?? undefined);
-  const showLinked = session.started && !!country && linkedOpen;
+  globe?.showAnswer(answer || reading ? country ?? undefined : undefined, answer ?? undefined);
+  const showLinked = session.started && !!country && linkedOpen && !reading;
   app.classList.toggle('has-linked-maps', showLinked);
   document.querySelector<HTMLElement>('#linked-detail')!.hidden = !showLinked;
   document.querySelector<HTMLElement>('#overview-label')!.hidden = !showLinked;
@@ -318,8 +341,8 @@ function renderQuestion() {
   }
   document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
   document.querySelector('#country')!.textContent = country?.properties.name ?? '';
-  document.querySelector('#question-kind')!.textContent = session.questionKind ? questionLabels[session.questionKind] : '';
-  document.querySelector('#question-number')!.textContent = `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
+  document.querySelector('#question-kind')!.textContent = reading ? 'Country fact cards' : session.questionKind ? questionLabels[session.questionKind] : '';
+  document.querySelector('#question-number')!.textContent = reading ? 'Reading' : `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
   document.querySelector('#answered-count')!.textContent = String(session.attempts.length);
   document.querySelector('#correct-count')!.textContent = String(session.attempts.filter(attempt => attempt.correct && !attempt.assisted).length);
   const guidedCount = session.attempts.filter(attempt => attempt.assisted).length;
@@ -340,14 +363,15 @@ function renderQuestion() {
   marker = undefined;
   answerPolygon = undefined;
   pendingPoint = null;
-  panel.classList.toggle('is-answered', !!answer);
+  panel.classList.toggle('is-answered', !!answer || reading);
   factCard.hidden = true;
   factCard.replaceChildren();
-  next.hidden = !answer;
+  next.hidden = !answer && !reading;
+  next.firstChild!.textContent = reading ? 'Next fact card ' : 'Next learning item ';
   retry.hidden = !answer || answer.correct;
   document.querySelector<HTMLElement>('#retry-note')!.hidden = session.questionKind !== 'retry';
   document.querySelector<HTMLElement>('#practice-note')!.hidden = session.questionKind !== 'practice';
-  check.hidden = !!answer;
+  check.hidden = !!answer || reading;
   check.disabled = true;
   const itemProficiency = session.proficiency;
   proficiency.hidden = !itemProficiency;
@@ -361,6 +385,13 @@ function renderQuestion() {
     return;
   }
   feedback.className = 'selection-hint';
+  if (reading) {
+    feedback.textContent = 'Reading does not change proficiency or review dates. Locations shown here count as help for unanswered questions.';
+    renderFactCard(country.properties.id, factVersion);
+    highlightCountry(country.properties.id);
+    if (!globeOpen) focusAnswer();
+    return;
+  }
   if (!answer) {
     feedback.textContent = showLinked ? 'Select your location in the country close-up.' : globeOpen ? 'Rotate the globe, then click to place your pin.' : 'Tap the map to place your pin.';
     if (showLinked) linkedMaps.show(country);
@@ -392,21 +423,25 @@ function renderQuestion() {
     linkedMaps.show(country, answer);
     return;
   }
-  boundaries.eachLayer(layer => {
-    const polygon = layer as L.Polygon & { feature: Country };
-    if (polygon.feature.properties.id !== answer.countryId) return;
-    polygon.setStyle({ color: '#e3f5b1', weight: 2, fillColor: '#a2c472' });
-    polygon.bringToFront();
-    answerPolygon = polygon;
-  });
+  highlightCountry(answer.countryId);
   marker = L.circleMarker([answer.latitude, answer.longitude], {
     radius: 7, weight: 3, color: '#111f2c', fillColor: answer.correct ? '#d6ef87' : '#ea947b', fillOpacity: 1, interactive: false,
   }).addTo(map);
   if (!globeOpen) focusAnswer();
 }
 
+function highlightCountry(countryId: string) {
+  boundaries.eachLayer(layer => {
+    const polygon = layer as L.Polygon & { feature: Country };
+    if (polygon.feature.properties.id !== countryId) return;
+    polygon.setStyle({ color: '#e3f5b1', weight: 2, fillColor: '#a2c472' });
+    polygon.bringToFront();
+    answerPolygon = polygon;
+  });
+}
+
 function selectPoint(point: L.LatLng) {
-  if (!session.started || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
+  if (!session.started || session.readingFacts || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
   pendingPoint = point;
   globe?.setSelection({ longitude: point.lng, latitude: point.lat });
   if (!linkedOpen && !globeOpen) {
@@ -491,5 +526,18 @@ document.querySelector('#confirm-reset')!.addEventListener('click', () => {
   linkedOpen = false;
   renderQuestion();
   document.querySelector<HTMLButtonElement>('#start')!.focus();
+});
+const facetSetup = createFacetSetup(selection => {
+  session.choosePractice(selection);
+  linkedOpen = session.assisted;
+  renderQuestion();
+});
+document.querySelector('#facet-mode')!.addEventListener('click', () => facetSetup.open(session.selection));
+document.querySelector('#edit-facets')!.addEventListener('click', () => facetSetup.open(session.selection));
+document.querySelector('#adaptive-mode')!.addEventListener('click', () => {
+  if (!session.selection) return;
+  session.choosePractice(null);
+  linkedOpen = session.assisted;
+  renderQuestion();
 });
 renderQuestion();

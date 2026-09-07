@@ -1,0 +1,177 @@
+import { expect, test, type Page } from '@playwright/test';
+import { answerWorldPoint } from './map-interaction';
+
+async function openFacetSetup(page: Page) {
+  await page.getByRole('button', { name: 'Facet mode', exact: true }).click();
+  const setup = page.getByRole('dialog', { name: 'Facet setup' });
+  await setup.getByRole('radio', { name: 'Countries & territories', exact: true }).check();
+  await setup.getByRole('button', { name: 'Continue', exact: true }).click();
+  return setup;
+}
+
+test('a guest chooses country practice through the guided facet setup', async ({ page }) => {
+  await page.goto('/');
+  const setup = await openFacetSetup(page);
+  await setup.getByRole('button', { name: 'Continue', exact: true }).click();
+  await setup.getByRole('radio', { name: 'Name-to-location', exact: true }).check();
+  await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
+  await expect(setup).toBeHidden();
+  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
+  const selection = page.getByRole('region', { name: 'Current practice selection' });
+  await expect(selection).toContainText('Countries & territories');
+  await expect(selection).toContainText('Worldwide');
+  await expect(selection).toContainText('Name-to-location');
+});
+
+
+test('regional country practice stays filtered across questions and reloads', async ({ page }) => {
+  await page.goto('/');
+  const setup = await openFacetSetup(page);
+  await setup.getByRole('combobox', { name: 'Continent', exact: true }).selectOption('Asia');
+  await setup.getByRole('combobox', { name: 'Region', exact: true }).selectOption('Eastern Asia');
+  await setup.getByRole('button', { name: 'Continue', exact: true }).click();
+  await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /China/ })).toBeVisible();
+  await answerWorldPoint(page, 105, 35);
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(page.getByRole('heading', { name: /Japan/ })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: /Japan/ })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Current practice selection' })).toContainText('Eastern Asia');
+  await page.getByRole('button', { name: 'Edit practice set' }).click();
+  await setup.getByRole('button', { name: '2 Geography' }).click();
+  await setup.getByRole('combobox', { name: 'Continent', exact: true }).selectOption('Europe');
+  await expect(setup.getByRole('combobox', { name: 'Region', exact: true })).toHaveValue('All regions');
+  await setup.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Japan/ })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Current practice selection' })).toContainText('Eastern Asia');
+});
+
+test('adaptive and facet practice share proficiency without dropping out-of-scope reviews', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  await answerWorldPoint(page, -52, -12);
+  const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
+  await expect(proficiency).toContainText('Familiar');
+  const setup = await openFacetSetup(page);
+  await setup.getByRole('combobox', { name: 'Continent', exact: true }).selectOption('Asia');
+  await setup.getByRole('combobox', { name: 'Region', exact: true }).selectOption('Eastern Asia');
+  await setup.getByRole('button', { name: 'Continue', exact: true }).click();
+  await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
+  await answerWorldPoint(page, 105, 35);
+  await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
+  await page.getByRole('button', { name: 'Adaptive mode', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
+  await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
+  await answerWorldPoint(page, -52, -12);
+  await expect(proficiency).toContainText('Retained');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-11T12:00:00.000Z');
+  await openFacetSetup(page);
+  await setup.getByRole('combobox', { name: 'Continent', exact: true }).selectOption('South America');
+  await page.clock.setFixedTime(new Date('2026-09-11T12:00:00Z'));
+  await setup.getByRole('button', { name: 'Continue', exact: true }).click();
+  await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
+  await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
+  await answerWorldPoint(page, -52, -12);
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-18T12:00:00.000Z');
+  await page.reload();
+  await expect(proficiency).toContainText('Retained');
+  await page.getByRole('button', { name: 'Adaptive mode', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /China/ })).toBeVisible();
+  await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Practice results')).toContainText('4 answered');
+});
+
+test('filtered fact reading resumes without assessing countries or rescheduling reviews', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  await answerWorldPoint(page, -52, -12);
+  const setup = await openFacetSetup(page);
+  await setup.getByRole('combobox', { name: 'Continent', exact: true }).selectOption('Asia');
+  await setup.getByRole('combobox', { name: 'Region', exact: true }).selectOption('Eastern Asia');
+  await setup.getByRole('button', { name: 'Continue', exact: true }).click();
+  await setup.getByRole('radio', { name: 'Country fact cards', exact: true }).check();
+  await setup.getByRole('button', { name: 'Start reading', exact: true }).click();
+  const card = page.getByRole('region', { name: 'Country fact card' });
+  await expect(card.getByRole('heading', { name: /China/ })).toBeVisible();
+  await expect(card).toContainText('Informational · not scored');
+  await expect(page.getByRole('button', { name: 'Check location' })).toBeHidden();
+  await page.getByRole('button', { name: 'Next fact card' }).click();
+  await expect(card.getByRole('heading', { name: 'Japan', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(card.getByRole('heading', { name: 'Japan', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Current practice selection' })).toContainText('Country fact cards');
+  await expect(page.getByLabel('Practice results')).toContainText('1 answered');
+  await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
+  await page.getByRole('button', { name: 'Adaptive mode', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
+  await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
+  const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
+  await expect(proficiency).toContainText('Familiar');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-08T12:00:00.000Z');
+  await answerWorldPoint(page, -52, -12);
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(page.getByRole('heading', { name: /China/ })).toBeVisible();
+  await expect(page.getByText('New learning item', { exact: true })).toBeVisible();
+});
+
+test('switching sets preserves an unanswered guided question across reloads', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  await page.getByRole('button', { name: 'Show linked maps', exact: true }).click();
+  const setup = await openFacetSetup(page);
+  await setup.getByRole('combobox', { name: 'Continent', exact: true }).selectOption('Asia');
+  await setup.getByRole('combobox', { name: 'Region', exact: true }).selectOption('Eastern Asia');
+  await setup.getByRole('button', { name: 'Continue', exact: true }).click();
+  await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /China/ })).toBeVisible();
+  await page.reload();
+  await page.getByRole('button', { name: 'Adaptive mode', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
+  await expect(page.getByText(/Location help used · guided practice/)).toBeVisible();
+  await page.getByRole('button', { name: 'Use world map', exact: true }).click();
+  await answerWorldPoint(page, -52, -12);
+  await expect(page.getByRole('status')).toContainText('guided practice');
+  const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
+  await expect(proficiency).toContainText('Learning');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-07T12:10:00.000Z');
+  await expect(page.getByLabel('Practice results')).toContainText('0 correct');
+});
+
+test('fact-map reveals mark current and paused questions as guided without scoring reading', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  const setup = await openFacetSetup(page);
+  await setup.getByRole('combobox', { name: 'Continent', exact: true }).selectOption('Asia');
+  await setup.getByRole('combobox', { name: 'Region', exact: true }).selectOption('Eastern Asia');
+  await setup.getByRole('button', { name: 'Continue', exact: true }).click();
+  await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /China/ })).toBeVisible();
+  await openFacetSetup(page);
+  await setup.getByRole('combobox', { name: 'Continent', exact: true }).selectOption('Worldwide');
+  await setup.getByRole('button', { name: 'Continue', exact: true }).click();
+  await setup.getByRole('radio', { name: 'Country fact cards', exact: true }).check();
+  await setup.getByRole('button', { name: 'Start reading', exact: true }).click();
+  const card = page.getByRole('region', { name: 'Country fact card' });
+  await expect(card.getByRole('heading', { name: /Brazil/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Next fact card' }).click();
+  await expect(card.getByRole('heading', { name: /China/ })).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel('Practice results')).toContainText('0 answered');
+  await page.getByRole('button', { name: 'Adaptive mode', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
+  await expect(page.getByText(/Location help used · guided practice/)).toBeVisible();
+  await page.getByRole('button', { name: 'Use world map', exact: true }).click();
+  await answerWorldPoint(page, -52, -12);
+  const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
+  await expect(proficiency).toContainText('Learning');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-07T12:10:00.000Z');
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(page.getByRole('heading', { name: /China/ })).toBeVisible();
+  await expect(page.getByText(/Location help used · guided practice/)).toBeVisible();
+});
