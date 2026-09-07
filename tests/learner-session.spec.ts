@@ -488,7 +488,7 @@ test('name-to-location success schedules a later review and retained success ext
   await expect(proficiency).toContainText('Retained');
   await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-11T12:00:00.000Z');
   // Exploring a revealed answer must not downgrade earned retention.
-  await page.getByRole('button', { name: 'Explore linked maps' }).click();
+  await page.getByRole('button', { name: 'Explore location' }).click();
   await expect(page.getByRole('region', { name: 'Country close-up' })).toBeVisible();
   await expect(page.getByText(/Location help used/)).toBeHidden();
   await page.reload();
@@ -580,8 +580,8 @@ test('a fully introduced catalogue keeps practicing weak countries without chang
   await answerWorldPoint(page, 0, 0);
   await page.getByRole('button', { name: 'Next learning item' }).click();
   await expect(page.getByRole('heading', { name: /Algeria/ })).toBeVisible();
-  await page.getByRole('button', { name: 'Show linked maps' }).click();
-  await page.getByRole('button', { name: 'Use world map' }).click();
+  await page.getByRole('button', { name: 'Show location' }).click();
+  await page.getByRole('button', { name: 'Back to world map' }).click();
   await answerWorldPoint(page, 3, 28);
   await expect(page.getByRole('status')).toContainText('Correct');
   await page.reload();
@@ -610,7 +610,7 @@ test('linked-map help survives reload and schedules an unassisted check instead 
   await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
   await seedQuestion(page, 'ALD');
   await page.goto('/');
-  await page.getByRole('button', { name: 'Show linked maps' }).click();
+  await page.getByRole('button', { name: 'Show location' }).click();
   const overview = page.getByRole('region', { name: 'Regional overview' });
   const detail = page.getByRole('region', { name: 'Country close-up' });
   await expect(overview).toBeVisible();
@@ -619,7 +619,7 @@ test('linked-map help survives reload and schedules an unassisted check instead 
   await expect(page.getByRole('button', { name: 'Check location' })).toBeDisabled();
   await page.getByRole('button', { name: 'Back to the country' }).click();
   await expect(page.getByText(/Location help used/)).toBeVisible();
-  await page.getByRole('button', { name: 'Use world map' }).click();
+  await page.getByRole('button', { name: 'Back to world map' }).click();
   await expect(detail).toBeHidden();
   await expect(page.getByText(/Location help used/)).toBeVisible();
   await page.reload();
@@ -669,8 +669,8 @@ test('help on a scheduled review replaces familiarity with an unassisted check',
   const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
   await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
   await expect(proficiency).toContainText('Familiar');
-  await page.getByRole('button', { name: 'Show linked maps' }).click();
-  await page.getByRole('button', { name: 'Use world map' }).click();
+  await page.getByRole('button', { name: 'Show location' }).click();
+  await page.getByRole('button', { name: 'Back to world map' }).click();
   await answerWorldPoint(page, 67, 34);
   await expect(page.getByRole('status')).toContainText('Correct');
   await expect(proficiency).toContainText('Learning');
@@ -684,8 +684,8 @@ test('retrying a guided mistake preserves assistance without delaying the unassi
   await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
   await seedQuestion(page, 'AFG');
   await page.goto('/');
-  await page.getByRole('button', { name: 'Show linked maps' }).click();
-  await page.getByRole('button', { name: 'Use world map' }).click();
+  await page.getByRole('button', { name: 'Show location' }).click();
+  await page.getByRole('button', { name: 'Back to world map' }).click();
   await answerWorldPoint(page, 0, 0);
   await expect(page.getByRole('status')).toContainText('Not quite');
   const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
@@ -696,7 +696,7 @@ test('retrying a guided mistake preserves assistance without delaying the unassi
   await expect(page.getByText(/Location help used/)).toBeVisible();
   await page.reload();
   await expect(page.getByRole('region', { name: 'Country close-up' })).toBeVisible();
-  await page.getByRole('button', { name: 'Use world map' }).click();
+  await page.getByRole('button', { name: 'Back to world map' }).click();
   await answerWorldPoint(page, 67, 34);
   await expect(page.getByRole('status')).toContainText('Correct');
   await page.reload();
@@ -709,7 +709,7 @@ test('linked maps retain regional context and answer controls on short screens',
   await page.setViewportSize({ width: 375, height: 550 });
   await seedQuestion(page, 'AFG');
   await page.goto('/');
-  await page.getByRole('button', { name: 'Show linked maps' }).click();
+  await page.getByRole('button', { name: 'Show location' }).click();
   await expect(page.getByRole('region', { name: 'Regional overview' }).getByText('India', { exact: true })).toBeVisible();
   await page.getByRole('region', { name: 'Country close-up' }).click();
   await page.getByRole('button', { name: 'Check location' }).click();

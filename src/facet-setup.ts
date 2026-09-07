@@ -5,7 +5,7 @@ import './facet-setup.css';
 export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
   const dialog = document.createElement('dialog');
   dialog.className = 'facet-setup';
-  dialog.setAttribute('aria-label', 'Facet setup');
+  dialog.setAttribute('aria-label', 'Custom practice setup');
   dialog.innerHTML = `
     <div class="facet-setup-layout">
       <section class="facet-wizard">
@@ -15,7 +15,7 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
           <button type="button" data-step="3"><span>3</span> Learning</button>
         </nav>
         <div class="facet-wizard-body">
-          <p class="eyebrow">Facet mode / <span id="facet-step-count"></span></p>
+          <p class="eyebrow">Custom practice / <span id="facet-step-count"></span></p>
           <section data-page="1">
             <h2 tabindex="-1">What would you like to explore?</h2>
             <p class="facet-description">Start with a kind of place. We’ll narrow it down together.</p>
@@ -35,7 +35,7 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
           <section data-page="3" hidden>
             <h2 tabindex="-1">What would you like to learn?</h2>
             <p class="facet-description">Practice a spatial skill, or slow down with country facts.</p>
-            <fieldset class="facet-learning"><legend class="facet-note">Available learning facets</legend>
+            <fieldset class="facet-learning"><legend class="facet-note">Available learning options</legend>
               <label class="facet-choice"><input type="radio" name="learning" value="name-to-location" aria-label="Name-to-location" checked><span><strong>Name-to-location</strong><small>Find a named country on the map or globe.</small></span></label>
               <label class="facet-choice"><input type="radio" name="learning" value="country-facts" aria-label="Country fact cards"><span><strong>Country fact cards</strong><small>Read sourced facts. Reading is not scored and does not reschedule reviews.</small></span></label>
             </fieldset>
@@ -53,7 +53,7 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
         <h2>A little more<br>of <em>the world.</em></h2>
         <p class="facet-plan-selection"></p>
         <p class="facet-plan-count" aria-live="polite"></p>
-        <p class="facet-note">One learning history. Country practice uses the same proficiency and scheduled reviews as adaptive mode. Reviews outside your selection stay scheduled.</p>
+        <p class="facet-note">One learning history. Country practice uses the same proficiency and scheduled reviews as recommended practice. Reviews outside your selection stay scheduled.</p>
       </aside>
     </div>`;
   document.body.append(dialog);

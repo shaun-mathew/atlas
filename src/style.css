@@ -4,6 +4,8 @@ body { margin: 0; }
 [hidden] { display: none !important; }
 button { font: inherit; cursor: pointer; }
 button, a { -webkit-tap-highlight-color: transparent; }
+/* Action controls are not text-entry surfaces; retain their keyboard focus rings. */
+button, [role="button"], summary, label:has(> input[type="radio"]) { user-select: none; caret-color: transparent; }
 button:focus-visible, a:focus-visible, summary:focus-visible, .fact-card:focus-visible { outline: 3px solid #f7f8e9; outline-offset: 4px; }
 #app { position: relative; isolation: isolate; width: 100%; height: 100dvh; min-height: 480px; overflow: hidden; }
 #map { position: absolute; inset: 0; z-index: 0; background: #111e29; cursor: crosshair; }

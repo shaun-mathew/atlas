@@ -43,8 +43,8 @@ app.innerHTML = `
     </div>
   </header>
   <nav class="learning-modes" aria-label="Learning mode">
-    <button id="adaptive-mode" class="secondary" type="button" aria-pressed="true">Adaptive mode</button>
-    <button id="facet-mode" class="secondary" type="button" aria-pressed="false">Facet mode</button>
+    <button id="adaptive-mode" class="secondary" type="button" aria-pressed="true">Recommended practice</button>
+    <button id="facet-mode" class="secondary" type="button" aria-pressed="false">Custom practice</button>
   </nav>
   <p id="progress" class="progress" aria-label="Practice results"><span id="answered-count">0</span> answered <span class="progress-divider">·</span> <span id="correct-count">0</span> correct<span id="guided-count" hidden></span></p>
   <div class="session-panel">
@@ -67,11 +67,11 @@ app.innerHTML = `
       <h1><span id="country"></span><span class="accent">?</span></h1>
       <p class="instructions">Find it. Drop a pin. Trust your bearings.</p>
       <div class="location-tools">
-        <button id="location-help" class="secondary" type="button">Show linked maps</button>
+        <button id="location-help" class="secondary" type="button">Show location</button>
         <small id="help-warning">Reveals location · guided practice, not retention</small>
         <div id="linked-actions" hidden>
           <button id="recenter-country" class="secondary" type="button">Back to the country</button>
-          <button id="close-linked" class="secondary" type="button">Use world map</button>
+          <button id="close-linked" class="secondary" type="button">Back to world map</button>
         </div>
       </div>
       <p id="guided-note" hidden>Location help used · guided practice, not retention credit.</p>
@@ -101,24 +101,24 @@ app.innerHTML = `
     <h3>Map and globe presentations</h3>
     <p>2D map and 3D globe present the same country learning item. Switching keeps your selected geographic point, and both use the same 25 km tolerance, proficiency, and review schedule. Rotating or zooming does not change your selected answer or count as location help.</p>
     <p>On the globe, drag to rotate, scroll or pinch to zoom, and click or tap the earth to place a pin. You can also focus the globe and use arrow keys to rotate by 15°, +/− to zoom, and Enter or Space to select the centre. World view resets the view without clearing your pin. After checking, the target country is highlighted.</p>
-    <p>If 3D rendering is unavailable or interrupted, practice continues on the 2D map with your progress and selection intact. Show linked maps still reveals location and marks guided practice, including when you return to the globe. Both presentations use the same generalized boundaries; zooming does not add finer coastline detail.</p>
+    <p>If 3D rendering is unavailable or interrupted, practice continues on the 2D map with your progress and selection intact. Show location still reveals location and marks guided practice, including when you return to the globe. Both presentations use the same generalized boundaries; zooming does not add finer coastline detail.</p>
     <h3>Name-to-location reviews</h3>
     <p>Proficiency belongs to each country’s name-to-location skill, not to its capitals, facts, or other skills. On a new item, a miss means Learning and schedules a review in 10 minutes. A first success means Familiar and schedules a review in 1 day.</p>
     <p>Successful scheduled reviews extend the interval to 3, 7, 14, then 30 days (the maximum), and mark the skill Retained. A success after a miss restarts at Familiar and 1 day. Any missed review resets it to Learning and 10 minutes.</p>
     <h3>Country difficulty progression</h3>
     <p>New introductions begin with 16 recognizable countries across several regions, starting with Brazil, China, Australia, and India. Remaining countries and territories progress from larger to smaller main landmasses, leaving tiny islands and microstates until later. This is a map-selection difficulty guide, not a ranking of importance. Existing questions and due reviews are preserved; reset your learning progress if you want a fresh start.</p>
-    <h3>Adaptive practice</h3>
+    <h3>Recommended practice</h3>
     <p>Practice starts directly and adapts as you answer. Due reviews are selected oldest first. Otherwise, new countries are mixed with practice revisits: after two new introductions, an eligible previously seen country is selected, favoring its latest missed or guided answer, then the country least recently answered. Revisits normally have at least two intervening answers; new countries fill the gap while no revisit is eligible. Once every country has been introduced, practice continues with revisits. Stop whenever you like and resume from your saved question.</p>
     <p>Practice revisits reinforce countries before their scheduled review. Their answers affect revisit selection, but do not change retention proficiency or review dates. Immediate retries also leave retention unchanged, and do not erase a miss when selecting future revisits. There are no batch limits or waiting screens.</p>
-    <h3>Facet mode and geographic filters</h3>
-    <p>Facet mode guides you through Places, Geography, and Learning. Choose Countries & territories, a continent or region, and an available learning facet. Your practice selection stays visible above the question. Edit practice set reopens the setup; Cancel or Escape leaves the active session unchanged. Selections and the current item resume when you reload.</p>
-    <p>Name-to-location practice uses the same answers, proficiency, review dates, and country progression as adaptive mode, restricted to your chosen places. Due reviews inside the selection come first; reviews outside it remain scheduled. Returning to Adaptive mode includes all countries again. Unanswered questions keep their original kind and any location help when their country is selected again, even after switching sets or reloading.</p>
-    <p>Country fact cards is a reading facet: browse the existing sourced, versioned facts for your selected countries with Next fact card. Reading is informational, not an assessed skill; it records no answers and does not advance proficiency or reschedule reviews. Population remains informational. Switching to reading does not discard the pending spatial question.</p>
+    <h3>Custom practice and geographic filters</h3>
+    <p>Custom practice guides you through Places, Geography, and Learning. Choose Countries & territories, a continent or region, and an available learning option. Your practice selection stays visible above the question. Edit practice set reopens the setup; Cancel or Escape leaves the active session unchanged. Selections and the current item resume when you reload.</p>
+    <p>Name-to-location practice uses the same answers, proficiency, review dates, and country progression as recommended practice, restricted to your chosen places. Due reviews inside the selection come first; reviews outside it remain scheduled. Returning to Recommended practice includes all countries again. Unanswered questions keep their original kind and any location help when their country is selected again, even after switching sets or reloading.</p>
+    <p>Country fact cards is a reading option: browse the existing sourced, versioned facts for your selected countries with Next fact card. Reading is informational, not an assessed skill; it records no answers and does not advance proficiency or reschedule reviews. Population remains informational. Switching to reading does not discard the pending spatial question.</p>
     <p>The reading map reveals the displayed country’s location. If that country has an unanswered spatial question, the question keeps this exposure as location help, including while it is paused outside the active practice set. Reading alone still changes no proficiency or review dates; the eventual answer follows the guided-practice policy.</p>
     <p>Continental groups use each place’s Natural Earth region, including transcontinental countries. Worldwide includes all 241 mapped places; Open ocean keeps territories outside continental groups accessible. Choosing another continent resets the region to All regions. In a small practice set, revisits may occur sooner once every place in that set has been introduced, without advancing retention before a scheduled review.</p>
-    <h3>Linked-map location help</h3>
-    <p>Show linked maps reveals the country in a regional overview and a separate close-up. Clicking the overview moves the close-up; dragging or zooming the close-up moves its outlined window without moving the overview. Select a location in the close-up and use Check location as usual.</p>
-    <p>Using location help before answering marks that question as guided practice, even if you close the maps or reload. Guided answers are recorded separately from the correct-answer total and do not earn retention credit. On new items and scheduled reviews, they return the skill to Learning with an unassisted check in 10 minutes. Practice revisits and immediate retries leave the existing review schedule unchanged. Exploring linked maps after an answer does not change its recorded result or review schedule.</p>
+    <h3>Location help</h3>
+    <p>Show location reveals the country in a regional overview and a separate close-up. Clicking the overview moves the close-up; dragging or zooming the close-up moves its outlined window without moving the overview. Select a location in the close-up and use Check location as usual. Back to world map returns to the full map.</p>
+    <p>Using location help before answering marks that question as guided practice, even if you close the maps or reload. Guided answers are recorded separately from the correct-answer total and do not earn retention credit. On new items and scheduled reviews, they return the skill to Learning with an unassisted check in 10 minutes. Practice revisits and immediate retries leave the existing review schedule unchanged. Explore location is available after an answer and does not change its recorded result or review schedule.</p>
     <p>The close-up starts on the largest mapped land mass rather than fitting distant outlying islands. Very large countries start on a smaller area within that land mass. Nearby larger land masses provide regional context where available. These are the same generalized Natural Earth boundaries; zooming does not add finer coastline detail. Back to the country restores both views.</p>
   </dialog>
   <dialog id="profile-dialog" class="app-dialog" aria-labelledby="profile-title">
@@ -350,7 +350,7 @@ function renderQuestion() {
   guidedSummary.textContent = guidedCount ? ` · ${guidedCount} guided` : '';
   guidedSummary.hidden = guidedCount === 0;
   const locationHelp = document.querySelector<HTMLButtonElement>('#location-help')!;
-  locationHelp.textContent = answer ? 'Explore linked maps' : 'Show linked maps';
+  locationHelp.textContent = answer ? 'Explore location' : 'Show location';
   locationHelp.hidden = showLinked;
   document.querySelector<HTMLElement>('#linked-actions')!.hidden = !showLinked;
   document.querySelector<HTMLElement>('#help-warning')!.hidden = !!answer || showLinked || session.assisted;

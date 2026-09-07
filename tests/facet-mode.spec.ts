@@ -2,8 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { answerWorldPoint } from './map-interaction';
 
 async function openFacetSetup(page: Page) {
-  await page.getByRole('button', { name: 'Facet mode', exact: true }).click();
-  const setup = page.getByRole('dialog', { name: 'Facet setup' });
+  await page.getByRole('button', { name: 'Custom practice', exact: true }).click();
+  const setup = page.getByRole('dialog', { name: 'Custom practice setup' });
   await setup.getByRole('radio', { name: 'Countries & territories', exact: true }).check();
   await setup.getByRole('button', { name: 'Continue', exact: true }).click();
   return setup;
@@ -61,7 +61,7 @@ test('adaptive and facet practice share proficiency without dropping out-of-scop
   await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
   await answerWorldPoint(page, 105, 35);
   await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
-  await page.getByRole('button', { name: 'Adaptive mode', exact: true }).click();
+  await page.getByRole('button', { name: 'Recommended practice', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
   await answerWorldPoint(page, -52, -12);
@@ -78,7 +78,7 @@ test('adaptive and facet practice share proficiency without dropping out-of-scop
   await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-18T12:00:00.000Z');
   await page.reload();
   await expect(proficiency).toContainText('Retained');
-  await page.getByRole('button', { name: 'Adaptive mode', exact: true }).click();
+  await page.getByRole('button', { name: 'Recommended practice', exact: true }).click();
   await expect(page.getByRole('heading', { name: /China/ })).toBeVisible();
   await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
   await expect(page.getByLabel('Practice results')).toContainText('4 answered');
@@ -106,7 +106,7 @@ test('filtered fact reading resumes without assessing countries or rescheduling 
   await expect(page.getByRole('region', { name: 'Current practice selection' })).toContainText('Country fact cards');
   await expect(page.getByLabel('Practice results')).toContainText('1 answered');
   await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
-  await page.getByRole('button', { name: 'Adaptive mode', exact: true }).click();
+  await page.getByRole('button', { name: 'Recommended practice', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
   const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
@@ -122,7 +122,7 @@ test('switching sets preserves an unanswered guided question across reloads', as
   await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
-  await page.getByRole('button', { name: 'Show linked maps', exact: true }).click();
+  await page.getByRole('button', { name: 'Show location', exact: true }).click();
   const setup = await openFacetSetup(page);
   await setup.getByRole('combobox', { name: 'Continent', exact: true }).selectOption('Asia');
   await setup.getByRole('combobox', { name: 'Region', exact: true }).selectOption('Eastern Asia');
@@ -130,10 +130,10 @@ test('switching sets preserves an unanswered guided question across reloads', as
   await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
   await expect(page.getByRole('heading', { name: /China/ })).toBeVisible();
   await page.reload();
-  await page.getByRole('button', { name: 'Adaptive mode', exact: true }).click();
+  await page.getByRole('button', { name: 'Recommended practice', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByText(/Location help used · guided practice/)).toBeVisible();
-  await page.getByRole('button', { name: 'Use world map', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to world map', exact: true }).click();
   await answerWorldPoint(page, -52, -12);
   await expect(page.getByRole('status')).toContainText('guided practice');
   const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
@@ -163,10 +163,10 @@ test('fact-map reveals mark current and paused questions as guided without scori
   await expect(card.getByRole('heading', { name: /China/ })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel('Practice results')).toContainText('0 answered');
-  await page.getByRole('button', { name: 'Adaptive mode', exact: true }).click();
+  await page.getByRole('button', { name: 'Recommended practice', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByText(/Location help used · guided practice/)).toBeVisible();
-  await page.getByRole('button', { name: 'Use world map', exact: true }).click();
+  await page.getByRole('button', { name: 'Back to world map', exact: true }).click();
   await answerWorldPoint(page, -52, -12);
   const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
   await expect(proficiency).toContainText('Learning');

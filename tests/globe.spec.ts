@@ -166,7 +166,7 @@ test('lost WebGL preserves the globe pin and continues on the map', async ({ pag
 test('switching away from location help cannot earn unassisted globe credit', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
-  await page.getByRole('button', { name: 'Show linked maps', exact: true }).click();
+  await page.getByRole('button', { name: 'Show location', exact: true }).click();
   await page.getByRole('button', { name: '3D globe', exact: true }).click();
   await clickGlobePoint(page, -52, -12);
   await page.getByRole('button', { name: 'Check location' }).click();
