@@ -2,6 +2,7 @@ import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 import { pointToPolygonDistance } from '@turf/point-to-polygon-distance';
 import { z } from 'zod';
 import { countries } from './geography';
+import { factVersion } from './facts';
 
 const progressSchema = z.object({
   version: z.literal(1),
@@ -11,6 +12,8 @@ const progressSchema = z.object({
     countryId: z.string(),
     skill: z.literal('name-to-location'),
     boundaryVersion: z.literal('natural-earth-5.1.2-50m'),
+    // Answers saved before fact cards use the first published fact release.
+    factVersion: z.literal(factVersion).default('2026-09-07'),
     longitude: z.number().min(-180).max(180),
     latitude: z.number().min(-85).max(85),
     correct: z.boolean(),
@@ -70,6 +73,7 @@ export class GuestSession {
       countryId: this.country.properties.id,
       skill: 'name-to-location',
       boundaryVersion: 'natural-earth-5.1.2-50m',
+      factVersion,
       longitude, latitude, correct,
       selectedCountry: selected?.properties.name ?? null,
       answeredAt: new Date().toISOString(),

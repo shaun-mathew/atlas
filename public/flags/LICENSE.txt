@@ -1,0 +1,43 @@
+Flag artwork snapshot retrieved 2026-09-07.
+
+All SVGs except SOL.svg and CYN.svg are unmodified 4:3 assets from
+https://github.com/lipis/flag-icons/tree/086f7e97d657358203916dbe84f61c2bccaa81eb/flags/4x3
+
+Filenames use the learning dataset's Natural Earth ADM0_A3 identifiers,
+mapped to upstream assets using ISO_A2_EH from Natural Earth 5.1.2.
+https://github.com/nvkelso/natural-earth-vector/blob/v5.1.2/geojson/ne_50m_admin_0_countries.geojson
+Flags follow this pinned artwork collection, not a live political-status feed.
+Siachen Glacier (KAS) has no country flag and is intentionally omitted.
+Inclusion does not imply political recognition.
+
+The MIT License (MIT)
+
+Copyright (c) 2013 Panayiotis Lipiridis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+SOL.svg: Flag of Somaliland, Government of Somaliland, public domain.
+Unmodified source: https://commons.wikimedia.org/wiki/File:Flag_of_Somaliland.svg
+
+CYN.svg: Flag of the Turkish Republic of Northern Cyprus, Mike Rohsopht
+and Wikimedia Commons contributors. Unmodified source:
+https://commons.wikimedia.org/wiki/File:Flag_of_the_Turkish_Republic_of_Northern_Cyprus.svg
+Licensed under Creative Commons Attribution-Share Alike 4.0 International:
+https://creativecommons.org/licenses/by-sa/4.0/

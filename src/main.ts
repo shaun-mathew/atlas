@@ -2,6 +2,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import './style.css';
 import { countries, type Country } from './geography';
+import { getCountryFacts } from './facts';
 import { GuestSession } from './session';
 
 const app = document.querySelector<HTMLElement>('#app')!;
@@ -30,6 +31,7 @@ app.innerHTML = `
       <p class="instructions">Find it. Drop a pin. Trust your bearings.</p>
       <div class="answer-dock">
         <div id="feedback" role="status" aria-live="polite"></div>
+        <section id="country-fact-card" class="fact-card" aria-label="Country fact card" tabindex="0" hidden></section>
         <button id="check" class="primary" type="button" disabled>Check location <span aria-hidden="true">→</span></button>
         <button id="next" class="primary" type="button" hidden>Next learning item <span aria-hidden="true">→</span></button>
       </div>
@@ -51,6 +53,7 @@ const panel = document.querySelector<HTMLDivElement>('.session-panel')!;
 const header = document.querySelector<HTMLElement>('.app-header')!;
 const progress = document.querySelector<HTMLParagraphElement>('#progress')!;
 const feedback = document.querySelector<HTMLDivElement>('#feedback')!;
+const factCard = document.querySelector<HTMLElement>('#country-fact-card')!;
 const check = document.querySelector<HTMLButtonElement>('#check')!;
 const next = document.querySelector<HTMLButtonElement>('#next')!;
 const storageNotice = document.querySelector<HTMLParagraphElement>('#storage-notice')!;
@@ -109,6 +112,64 @@ function focusAnswer() {
 }
 map.on('resize', focusAnswer);
 
+const populationFormatter = new Intl.NumberFormat('en');
+
+function renderFactCard(countryId: string, version: string) {
+  const { facts, sources } = getCountryFacts(countryId, version);
+  const heading = document.createElement('h2');
+  heading.textContent = facts.name;
+  const fields = document.createElement('dl');
+  const population = facts.population;
+  const populationText = population.value === null
+    ? 'Unavailable'
+    : populationFormatter.format(population.value);
+  const referenceYear = population.referenceYear === null
+    ? 'reference year unavailable'
+    : `reference year ${population.referenceYear}`;
+  const entries = [
+    ['Relationship', facts.relationship],
+    ['Languages', facts.languages],
+    ['Population', `${populationText} (${referenceYear})${population.note ? `. ${population.note}` : ''}`],
+    ['Population direction', `${population.direction} · ${population.period}`],
+    ['Highlight', facts.highlight],
+  ];
+  for (const [label, value] of entries) {
+    const term = document.createElement('dt');
+    term.textContent = label;
+    const description = document.createElement('dd');
+    description.textContent = value;
+    fields.append(term, description);
+  }
+  const informational = document.createElement('p');
+  informational.className = 'fact-notice';
+  informational.textContent = 'Informational · not scored';
+  const details = document.createElement('details');
+  const summary = document.createElement('summary');
+  summary.textContent = 'Sources and fact version';
+  const scope = document.createElement('p');
+  scope.textContent = `Geographic scope: ${facts.geographicScope}`;
+  const versionLabel = document.createElement('p');
+  versionLabel.className = 'fact-version';
+  versionLabel.textContent = `Fact version: ${version}`;
+  const sourceList = document.createElement('ul');
+  for (const source of sources) {
+    const item = document.createElement('li');
+    const link = document.createElement('a');
+    link.href = source.url;
+    link.textContent = source.title;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    const retrieved = document.createElement('span');
+    retrieved.textContent = `Retrieved ${source.retrievedAt} · License: ${source.license}`;
+    item.append(link, retrieved);
+    sourceList.append(item);
+  }
+  details.append(summary, scope, sourceList);
+  factCard.replaceChildren(heading, informational, fields, versionLabel, details);
+  factCard.hidden = false;
+  factCard.scrollTop = 0;
+}
+
 function renderQuestion() {
   document.querySelector<HTMLElement>('#welcome')!.hidden = session.started;
   document.querySelector<HTMLElement>('#session')!.hidden = !session.started;
@@ -124,6 +185,9 @@ function renderQuestion() {
   answerPolygon = undefined;
   pendingPoint = null;
   const answer = session.feedback;
+  panel.classList.toggle('is-answered', !!answer);
+  factCard.hidden = true;
+  factCard.replaceChildren();
   next.hidden = !answer;
   check.hidden = !!answer;
   check.disabled = true;
@@ -134,6 +198,7 @@ function renderQuestion() {
     return;
   }
   feedback.className = `feedback ${answer.correct ? 'correct' : 'incorrect'}`;
+  renderFactCard(session.country.properties.id, answer.factVersion);
   const result = document.createElement('strong');
   result.textContent = answer.correct ? 'Correct — well placed.' : 'Not quite — take another look.';
   const explanation = document.createElement('span');
@@ -141,6 +206,16 @@ function renderQuestion() {
     ? 'Your selection is within the accepted geographic tolerance.'
     : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
   feedback.replaceChildren(result, explanation);
+  // Siachen Glacier is a disputed geographic area without its own country flag.
+  if (session.country.properties.id !== 'KAS') {
+    const flag = document.createElement('img');
+    flag.className = 'country-flag';
+    flag.src = new URL(`./flags/${session.country.properties.id}.svg`, document.baseURI).href;
+    flag.alt = `Flag of ${session.country.properties.name}`;
+    flag.width = 64;
+    flag.height = 48;
+    feedback.prepend(flag);
+  }
   boundaries.eachLayer(layer => {
     const polygon = layer as L.Polygon & { feature: Country };
     if (polygon.feature.properties.id !== answer.countryId) return;
