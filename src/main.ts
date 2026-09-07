@@ -13,19 +13,9 @@ const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
   <div id="map" role="region" aria-label="World map"></div>
   <section id="globe" role="region" aria-label="World globe" hidden>
-    <div class="globe-zoom map-zoom">
-      <button id="globe-zoom-in" type="button" aria-label="Zoom in on globe">+</button>
-      <button id="globe-zoom-out" type="button" aria-label="Zoom out on globe">−</button>
-    </div>
     <p id="globe-instructions">Drag to rotate · scroll or pinch to zoom · click to select.<br>Keyboard: arrows rotate, +/− zoom, Enter selects the centre.</p>
     <small class="globe-attribution">Natural Earth · Public domain</small>
   </section>
-  <div class="presentation-tools" role="group" aria-label="Map presentation">
-    <button id="toggle-presentation" class="secondary" type="button" aria-label="Switch to 3D globe" data-presentation="map">
-      <span class="map-label">2D</span><span class="presentation-divider" aria-hidden="true">|</span><span class="globe-label">3D</span>
-    </button>
-    <span id="globe-notice" role="alert" hidden></span>
-  </div>
   <div id="overview-label" class="linked-map-heading" hidden><span>Regional overview</span><small>Click to move the close-up</small></div>
   <section id="linked-detail" hidden>
     <header class="linked-map-heading"><span>Country close-up</span><small id="detail-instructions">Drag or zoom, then click to select</small></header>
@@ -39,11 +29,25 @@ app.innerHTML = `
     </a>
       <button id="open-profile" class="secondary profile-button" type="button" aria-label="Profile" title="Guest profile"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M4 17v-2a6 6 0 0 1 12 0v2" stroke="currentColor" stroke-width="1.5"/></svg></button>
   </header>
-    <button id="reset-map" class="secondary" type="button" aria-label="World view" title="World view"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg></button>
+    <div class="map-zoom" role="group" aria-label="Zoom controls">
+      <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
+      <button id="zoom-out" type="button" aria-label="Zoom out">−</button>
+    </div>
+  <div class="practice-toolbar">
   <nav class="learning-modes" aria-label="Learning mode">
     <button id="adaptive-mode" class="secondary" type="button" aria-pressed="true">Recommended practice</button>
     <button id="facet-mode" class="secondary" type="button" aria-pressed="false">Custom practice</button>
   </nav>
+  <div class="view-tools">
+  <div class="presentation-tools" role="group" aria-label="Map presentation">
+    <button id="toggle-presentation" class="secondary" type="button" aria-label="Switch to 3D globe" data-presentation="map">
+      <span class="map-label">2D</span><span class="presentation-divider" aria-hidden="true">|</span><span class="globe-label">3D</span>
+    </button>
+    <span id="globe-notice" role="alert" hidden></span>
+  </div>
+    <button id="reset-map" class="secondary" type="button" aria-label="World view" title="World view"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg></button>
+  </div>
+  </div>
   <p id="progress" class="progress" aria-label="Practice results"><span id="answered-count">0</span> answered <span class="progress-divider">·</span> <span id="correct-count">0</span> correct<span id="guided-count" hidden></span></p>
   <div class="session-panel">
     <section id="current-facets" class="current-facets" aria-label="Current practice selection" hidden>
@@ -135,17 +139,15 @@ let globe: Globe | undefined;
 let globeOpen = false;
 const globeContainer = document.querySelector<HTMLElement>('#globe')!;
 const presentationButton = document.querySelector<HTMLButtonElement>('#toggle-presentation')!;
-const presentationTools = document.querySelector<HTMLElement>('.presentation-tools')!;
-const worldViewButton = document.querySelector<HTMLButtonElement>('#reset-map')!;
+const zoomInButton = document.querySelector<HTMLButtonElement>('#zoom-in')!;
+const zoomOutButton = document.querySelector<HTMLButtonElement>('#zoom-out')!;
 
 function changePresentation(useGlobe: boolean) {
   const selection = pendingPoint;
-  const focusedControl = presentationTools.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
   globeOpen = useGlobe;
   linkedOpen = false;
   renderQuestion();
   if (selection && !session.feedback) selectPoint(selection);
-  focusedControl?.focus({ preventScroll: true });
 }
 
 function globeUnavailable() {
@@ -171,34 +173,30 @@ presentationButton.addEventListener('click', () => {
     globeUnavailable();
   }
 });
-document.querySelector('#globe-zoom-in')!.addEventListener('click', () => globe?.zoom(0.8));
-document.querySelector('#globe-zoom-out')!.addEventListener('click', () => globe?.zoom(1.25));
+function zoomPresentation(levels: 1 | -1) {
+  if (globeOpen) globe?.zoom(levels > 0 ? 0.8 : 1.25);
+  else if (app.classList.contains('has-linked-maps')) linkedMaps.zoomBy(levels);
+  else map.setZoom(map.getZoom() + levels);
+}
+
+function updateZoomControls() {
+  const worldMap = !globeOpen && !app.classList.contains('has-linked-maps');
+  const target = globeOpen ? ' on globe' : worldMap ? '' : ' on country close-up';
+  zoomInButton.setAttribute('aria-label', `Zoom in${target}`);
+  zoomOutButton.setAttribute('aria-label', `Zoom out${target}`);
+  zoomInButton.disabled = worldMap && map.getZoom() >= map.getMaxZoom();
+  zoomOutButton.disabled = worldMap && map.getZoom() <= map.getMinZoom();
+}
+
+zoomInButton.addEventListener('click', () => zoomPresentation(1));
+zoomOutButton.addEventListener('click', () => zoomPresentation(-1));
 
 const map = L.map('map', {
   minZoom: 1, maxZoom: 10, zoomControl: false, zoomAnimation: false,
   fadeAnimation: false, doubleClickZoom: false,
   maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1,
 }).setView([15, 0], app.clientWidth <= 700 ? 1 : 2);
-L.control.zoom({ position: 'topright' }).addTo(map).getContainer()!.classList.add('map-zoom');
-const presentationControl = new L.Control({ position: 'topright' });
-presentationControl.onAdd = () => presentationTools;
-L.DomEvent.disableClickPropagation(presentationTools);
-L.DomEvent.disableScrollPropagation(presentationTools);
-presentationControl.addTo(map);
-// Keep the mobile reset icon above the question card, at the visible map's bottom.
-const worldViewPosition = new ResizeObserver(() => {
-  if (app.clientWidth > 700) return;
-  const surface = (globeOpen ? globeContainer : map.getContainer()).getBoundingClientRect();
-  const container = app.getBoundingClientRect();
-  const bottom = !globeOpen && !app.classList.contains('has-linked-maps')
-    ? Math.min(surface.bottom, panel.getBoundingClientRect().top)
-    : surface.bottom;
-  worldViewButton.style.setProperty('--map-control-top', `${bottom - container.top - (globeOpen ? 58 : 46)}px`);
-  worldViewButton.style.setProperty('--map-control-right', `${container.right - surface.right + 12}px`);
-});
-worldViewPosition.observe(panel);
-worldViewPosition.observe(map.getContainer());
-worldViewPosition.observe(globeContainer);
+map.on('zoomend', updateZoomControls);
 map.attributionControl.addAttribution('Natural Earth · Public domain');
 const boundaries = L.geoJSON(countries, {
   style: { color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1 },
@@ -317,18 +315,13 @@ function renderQuestion() {
   app.classList.toggle('has-globe', globeOpen);
   globeContainer.hidden = !globeOpen;
   map.getContainer().hidden = globeOpen;
-  if (globeOpen && presentationTools.parentElement !== globeContainer) {
-    presentationControl.remove();
-    globeContainer.append(presentationTools);
-  } else if (!globeOpen && !map.getContainer().contains(presentationTools)) {
-    presentationControl.addTo(map);
-  }
   presentationButton.dataset.presentation = globeOpen ? 'globe' : 'map';
   presentationButton.setAttribute('aria-label', presentationButton.disabled ? '3D globe unavailable' : globeOpen ? 'Switch to 2D map' : 'Switch to 3D globe');
   globe?.setVisible(globeOpen);
   globe?.showAnswer(answer || reading ? country ?? undefined : undefined, answer ?? undefined);
   const showLinked = session.started && !!country && linkedOpen && !reading;
   app.classList.toggle('has-linked-maps', showLinked);
+  updateZoomControls();
   document.querySelector<HTMLElement>('#linked-detail')!.hidden = !showLinked;
   document.querySelector<HTMLElement>('#overview-label')!.hidden = !showLinked;
   map.getContainer().setAttribute('aria-label', showLinked ? 'Regional overview' : 'World map');

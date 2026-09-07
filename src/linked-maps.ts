@@ -175,7 +175,6 @@ export class LinkedMaps {
         zoomAnimation: false, fadeAnimation: false, markerZoomAnimation: false,
         doubleClickZoom: false, inertia: false, maxBoundsViscosity: 1,
       });
-      L.control.zoom({ position: 'topright' }).addTo(this.detail);
       L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(this.detail);
       this.detail.attributionControl.addAttribution('Natural Earth · Public domain');
       L.geoJSON(countries, { style: boundaryStyle, interactive: false }).addTo(this.detail);
@@ -231,6 +230,11 @@ export class LinkedMaps {
     if (!this.active) return;
     this.needsRecenter = true;
     this.resize();
+  }
+
+  zoomBy(levels: 1 | -1): void {
+    if (!this.active || !this.detail) return;
+    this.detail.setZoom(this.detail.getZoom() + levels);
   }
 
   private resize(): void {
