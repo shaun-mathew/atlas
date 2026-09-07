@@ -20,15 +20,22 @@ app.innerHTML = `
       <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="13" stroke="currentColor" stroke-width="1.2"/><path d="m21 10-3 9-8 3 3-9 8-3Z" stroke="currentColor" stroke-width="1.2"/><path d="m21 10-8 3 5 6 3-9Z" fill="currentColor"/></svg>
       <span>Atlas<span class="brand-subtitle">A little further, every day.</span></span>
     </a>
-    <div class="map-actions"><button id="reset-map" class="secondary" type="button"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg>World view</button><button id="map-info" class="secondary info-button" type="button" aria-label="Map coverage and review policy">i</button></div>
+    <div class="map-actions">
+      <button id="reset-map" class="secondary" type="button" aria-label="World view"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg><span class="world-view-label">World view</span></button>
+      <button id="map-info" class="secondary info-button" type="button" aria-label="Map coverage and review policy">i</button>
+      <button id="open-profile" class="secondary profile-button" type="button" aria-label="Profile" title="Guest profile"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M4 17v-2a6 6 0 0 1 12 0v2" stroke="currentColor" stroke-width="1.5"/></svg></button>
+    </div>
   </header>
   <p id="progress" class="progress" aria-label="Practice results"><span id="answered-count">0</span> answered <span class="progress-divider">·</span> <span id="correct-count">0</span> correct<span id="guided-count" hidden></span></p>
   <div class="session-panel">
     <section id="welcome">
       <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> Guest practice</p>
       <h1>A world worth knowing<span class="accent">.</span></h1>
-      <p class="instructions">Build your geographic knowledge, one country at a time. No account needed.</p>
-      <div class="answer-dock"><button id="start" class="primary" type="button">Start country session <span aria-hidden="true">→</span></button><p class="local-note">Your progress stays in this browser.</p></div>
+      <p class="instructions">Start with larger, recognizable countries and work toward smaller places. Keep practicing for as long as you like. No account needed.</p>
+      <div class="answer-dock">
+        <button id="start" class="primary" type="button">Start country session <span aria-hidden="true">→</span></button>
+        <p class="local-note">Your progress stays in this browser.</p>
+      </div>
     </section>
     <section id="session" hidden>
       <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> <span id="question-kind">New learning item</span> <span id="question-number"></span></p>
@@ -50,6 +57,7 @@ app.innerHTML = `
           <p>Name-to-location · <strong id="proficiency-level"></strong></p>
           <p>Review due <time id="review-at"></time></p>
           <p id="retry-note" hidden>Immediate retry records practice, not retention; your review time stays unchanged.</p>
+          <p id="practice-note" hidden>Practice revisit reinforces this country without changing retention proficiency or its scheduled review.</p>
         </section>
         <section id="country-fact-card" class="fact-card" aria-label="Country fact card" tabindex="0" hidden></section>
         <button id="check" class="primary" type="button" disabled>Check location <span aria-hidden="true">→</span></button>
@@ -57,30 +65,44 @@ app.innerHTML = `
         <button id="retry" class="secondary" type="button" hidden>Retry now</button>
       </div>
     </section>
-    <section id="review-wait" hidden>
-      <p class="eyebrow">Country practice</p>
-      <h1>All caught up<span class="accent">.</span></h1>
-      <p class="instructions">Next review: <time id="next-review-at"></time></p>
-      <div class="answer-dock"><button id="check-reviews" class="primary" type="button">Check due reviews</button></div>
-    </section>
     <p id="storage-notice" role="alert" hidden></p>
   </div>
-  <span class="map-caption" aria-hidden="true">A world worth knowing</span>
-  <dialog id="geography-policy" aria-labelledby="policy-title">
-    <button id="close-policy" class="secondary" type="button">Close</button>
+  <dialog id="geography-policy" class="app-dialog" aria-labelledby="policy-title">
+    <button id="close-policy" class="secondary dialog-close" type="button">Close</button>
     <h2 id="policy-title">Map coverage & review policy</h2>
     <p>Points inside the target boundary or within 25 km are accepted, unless they fall inside another mapped country or territory.</p>
     <p>241 countries and territories, excluding Antarctica. Public-domain <a href="https://www.naturalearthdata.com/about/terms-of-use/">Natural Earth</a> 5.1.2, 1:50m Admin-0 boundaries, retrieved 7 September 2026.</p>
     <p>We use its de facto boundaries and mapped territories; inclusion does not imply political recognition. Small islands and borders are generalized. This is a fixed learning dataset, not a source of legal boundaries.</p>
-    <p>Drag to explore, use + and − to zoom, and select a point before checking your answer. Guest progress is saved in this browser, not across devices. Clearing browser data removes that progress.</p>
+    <p>Drag to explore, use + and − to zoom, and select a point before checking your answer. Guest progress is saved in this browser, not across devices. Open Profile to see your identity or reset learning progress. Resetting requires confirmation and clears this app’s answers, proficiency, and reviews; it does not clear unrelated browser data.</p>
     <h3>Name-to-location reviews</h3>
-    <p>Proficiency belongs to each country’s name-to-location skill, not to its capitals, facts, or other skills. A miss means Learning and schedules a review in 10 minutes. A first success means Familiar and schedules a review in 1 day.</p>
+    <p>Proficiency belongs to each country’s name-to-location skill, not to its capitals, facts, or other skills. On a new item, a miss means Learning and schedules a review in 10 minutes. A first success means Familiar and schedules a review in 1 day.</p>
     <p>Successful scheduled reviews extend the interval to 3, 7, 14, then 30 days (the maximum), and mark the skill Retained. A success after a miss restarts at Familiar and 1 day. Any missed review resets it to Learning and 10 minutes.</p>
-    <p>Retry now repeats the revealed learning item immediately. Retry answers count as practice, but do not change retention proficiency or postpone the scheduled review. Due reviews are selected oldest first, before unseen countries. When nothing is due and all countries have been introduced, practice waits for the next review. Review dates use your local time.</p>
+    <h3>Country difficulty progression</h3>
+    <p>New introductions begin with 16 recognizable countries across several regions, starting with Brazil, China, Australia, and India. Remaining countries and territories progress from larger to smaller main landmasses, leaving tiny islands and microstates until later. This is a map-selection difficulty guide, not a ranking of importance. Existing questions and due reviews are preserved; reset your learning progress if you want a fresh start.</p>
+    <h3>Adaptive practice</h3>
+    <p>Practice starts directly and adapts as you answer. Due reviews are selected oldest first. Otherwise, new countries are mixed with practice revisits: after two new introductions, an eligible previously seen country is selected, favoring its latest missed or guided answer, then the country least recently answered. Revisits normally have at least two intervening answers; new countries fill the gap while no revisit is eligible. Once every country has been introduced, practice continues with revisits. Stop whenever you like and resume from your saved question.</p>
+    <p>Practice revisits reinforce countries before their scheduled review. Their answers affect revisit selection, but do not change retention proficiency or review dates. Immediate retries also leave retention unchanged, and do not erase a miss when selecting future revisits. There are no batch limits or waiting screens.</p>
     <h3>Linked-map location help</h3>
     <p>Show linked maps reveals the country in a regional overview and a separate close-up. Clicking the overview moves the close-up; dragging or zooming the close-up moves its outlined window without moving the overview. Select a location in the close-up and use Check location as usual.</p>
-    <p>Using location help before answering marks that question as guided practice, even if you close the maps or reload. Guided answers are recorded separately from the correct-answer total, do not earn retention credit, and return the skill to Learning with an unassisted check in 10 minutes. Immediate retries keep that check unchanged. Exploring linked maps after an answer does not change its recorded result or review schedule.</p>
+    <p>Using location help before answering marks that question as guided practice, even if you close the maps or reload. Guided answers are recorded separately from the correct-answer total and do not earn retention credit. On new items and scheduled reviews, they return the skill to Learning with an unassisted check in 10 minutes. Practice revisits and immediate retries leave the existing review schedule unchanged. Exploring linked maps after an answer does not change its recorded result or review schedule.</p>
     <p>The close-up starts on the largest mapped land mass rather than fitting distant outlying islands. Very large countries start on a smaller area within that land mass. Nearby larger land masses provide regional context where available. These are the same generalized Natural Earth boundaries; zooming does not add finer coastline detail. Back to the country restores both views.</p>
+  </dialog>
+  <dialog id="profile-dialog" class="app-dialog" aria-labelledby="profile-title">
+    <button id="close-profile" class="secondary dialog-close" type="button">Close</button>
+    <h2 id="profile-title">Your profile</h2>
+    <h3>Guest profile</h3>
+    <p>Not signed in. This app currently keeps your learning progress in this browser; no account is connected.</p>
+    <p id="profile-progress"></p>
+    <button id="request-reset" class="secondary danger" type="button">Reset learning progress</button>
+    <section id="reset-confirmation" aria-labelledby="reset-title" hidden>
+      <h3 id="reset-title">Reset learning progress?</h3>
+      <p>This permanently deletes your answers, proficiency, and scheduled reviews in this browser. It cannot be undone.</p>
+      <div class="profile-actions">
+        <button id="cancel-reset" class="secondary" type="button">Cancel</button>
+        <button id="confirm-reset" class="primary danger" type="button">Reset progress</button>
+      </div>
+    </section>
+    <p id="profile-reset-error" role="alert" hidden></p>
   </dialog>`;
 
 const session = new GuestSession();
@@ -94,10 +116,16 @@ const next = document.querySelector<HTMLButtonElement>('#next')!;
 const retry = document.querySelector<HTMLButtonElement>('#retry')!;
 const storageNotice = document.querySelector<HTMLParagraphElement>('#storage-notice')!;
 const policy = document.querySelector<HTMLDialogElement>('#geography-policy')!;
+const profile = document.querySelector<HTMLDialogElement>('#profile-dialog')!;
+const resetRequest = document.querySelector<HTMLButtonElement>('#request-reset')!;
+const resetConfirmation = document.querySelector<HTMLElement>('#reset-confirmation')!;
+const profileResetError = document.querySelector<HTMLElement>('#profile-reset-error')!;
 const proficiency = document.querySelector<HTMLElement>('#proficiency')!;
 const reviewAt = document.querySelector<HTMLTimeElement>('#review-at')!;
 const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-const questionLabels = { new: 'New learning item', review: 'Scheduled review', retry: 'Immediate retry' };
+const questionLabels: Record<'new' | 'review' | 'retry' | 'practice', string> = {
+  new: 'New learning item', review: 'Scheduled review', retry: 'Immediate retry', practice: 'Practice revisit',
+};
 let pendingPoint: L.LatLng | null = null;
 let marker: L.CircleMarker | undefined;
 let answerPolygon: L.Polygon | undefined;
@@ -226,7 +254,6 @@ function renderQuestion() {
     map.invalidateSize({ pan: false });
   }
   document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
-  document.querySelector<HTMLElement>('#review-wait')!.hidden = !session.started || !!country;
   document.querySelector('#country')!.textContent = country?.properties.name ?? '';
   document.querySelector('#question-kind')!.textContent = session.questionKind ? questionLabels[session.questionKind] : '';
   document.querySelector('#question-number')!.textContent = `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
@@ -256,6 +283,7 @@ function renderQuestion() {
   next.hidden = !answer;
   retry.hidden = !answer || answer.correct;
   document.querySelector<HTMLElement>('#retry-note')!.hidden = session.questionKind !== 'retry';
+  document.querySelector<HTMLElement>('#practice-note')!.hidden = session.questionKind !== 'practice';
   check.hidden = !!answer;
   check.disabled = true;
   const itemProficiency = session.proficiency;
@@ -266,10 +294,6 @@ function renderQuestion() {
     reviewAt.textContent = dateFormatter.format(new Date(itemProficiency.dueAt));
   }
   if (!country) {
-    const dueAt = session.nextReviewAt;
-    const nextReview = document.querySelector<HTMLTimeElement>('#next-review-at')!;
-    nextReview.dateTime = dueAt ?? '';
-    nextReview.textContent = dueAt ? dateFormatter.format(new Date(dueAt)) : '';
     map.setView([15, 0], app.clientWidth <= 700 ? 1 : 2, { animate: false });
     return;
   }
@@ -351,11 +375,6 @@ retry.addEventListener('click', () => {
   linkedOpen = session.assisted;
   renderQuestion();
 });
-document.querySelector('#check-reviews')!.addEventListener('click', () => {
-  session.next();
-  linkedOpen = false;
-  renderQuestion();
-});
 document.querySelector('#location-help')!.addEventListener('click', () => {
   session.requestLocationHelp();
   linkedOpen = true;
@@ -376,4 +395,35 @@ document.querySelector('#reset-map')!.addEventListener('click', () => {
 });
 document.querySelector('#map-info')!.addEventListener('click', () => policy.showModal());
 document.querySelector('#close-policy')!.addEventListener('click', () => policy.close());
+document.querySelector('#open-profile')!.addEventListener('click', () => {
+  document.querySelector('#profile-progress')!.textContent = `${session.attempts.length} answers in this guest profile.`;
+  resetConfirmation.hidden = true;
+  resetRequest.hidden = false;
+  profileResetError.hidden = true;
+  profile.showModal();
+});
+document.querySelector('#close-profile')!.addEventListener('click', () => profile.close());
+resetRequest.addEventListener('click', () => {
+  resetConfirmation.hidden = false;
+  resetRequest.hidden = true;
+  profileResetError.hidden = true;
+  document.querySelector<HTMLButtonElement>('#cancel-reset')!.focus();
+});
+document.querySelector('#cancel-reset')!.addEventListener('click', () => {
+  resetConfirmation.hidden = true;
+  resetRequest.hidden = false;
+  profileResetError.hidden = true;
+  resetRequest.focus();
+});
+document.querySelector('#confirm-reset')!.addEventListener('click', () => {
+  if (!session.reset()) {
+    profileResetError.textContent = session.storageNotice;
+    profileResetError.hidden = false;
+    return;
+  }
+  profile.close();
+  linkedOpen = false;
+  renderQuestion();
+  document.querySelector<HTMLButtonElement>('#start')!.focus();
+});
 renderQuestion();

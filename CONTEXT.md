@@ -55,7 +55,7 @@ The learner's demonstrated level for a particular learning item and skill.
 _Avoid_: Overall score, which collapses distinct capabilities
 
 **Adaptive mode**:
-A learning mode that selects learning items from the learner's diagnostic results and scheduled reviews.
+A learning mode that selects learning items from the learner's answers, proficiency, and scheduled reviews.
 _Avoid_: Smart mode, which does not explain what adapts
 
 **Facet mode**:
