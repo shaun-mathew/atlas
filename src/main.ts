@@ -5,10 +5,24 @@ import { countries, type Country } from './geography';
 import { getCountryFacts } from './facts';
 import { GuestSession } from './session';
 import { LinkedMaps } from './linked-maps';
+import { Globe } from './globe';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
   <div id="map" role="region" aria-label="World map"></div>
+  <section id="globe" role="region" aria-label="World globe" hidden>
+    <div class="globe-zoom">
+      <button id="globe-zoom-in" class="secondary" type="button" aria-label="Zoom in on globe">+</button>
+      <button id="globe-zoom-out" class="secondary" type="button" aria-label="Zoom out on globe">−</button>
+    </div>
+    <p id="globe-instructions">Drag to rotate · scroll or pinch to zoom · click to select.<br>Keyboard: arrows rotate, +/− zoom, Enter selects the centre.</p>
+    <small class="globe-attribution">Natural Earth · Public domain</small>
+  </section>
+  <div class="presentation-tools" role="group" aria-label="Map presentation">
+    <button id="use-map" class="secondary" type="button" aria-pressed="true">2D map</button>
+    <button id="use-globe" class="secondary" type="button" aria-pressed="false">3D globe</button>
+    <span id="globe-notice" role="alert" hidden></span>
+  </div>
   <div id="overview-label" class="linked-map-heading" hidden><span>Regional overview</span><small>Click to move the close-up</small></div>
   <section id="linked-detail" hidden>
     <header class="linked-map-heading"><span>Country close-up</span><small id="detail-instructions">Drag or zoom, then click to select</small></header>
@@ -74,6 +88,10 @@ app.innerHTML = `
     <p>241 countries and territories, excluding Antarctica. Public-domain <a href="https://www.naturalearthdata.com/about/terms-of-use/">Natural Earth</a> 5.1.2, 1:50m Admin-0 boundaries, retrieved 7 September 2026.</p>
     <p>We use its de facto boundaries and mapped territories; inclusion does not imply political recognition. Small islands and borders are generalized. This is a fixed learning dataset, not a source of legal boundaries.</p>
     <p>Drag to explore, use + and − to zoom, and select a point before checking your answer. Guest progress is saved in this browser, not across devices. Open Profile to see your identity or reset learning progress. Resetting requires confirmation and clears this app’s answers, proficiency, and reviews; it does not clear unrelated browser data.</p>
+    <h3>Map and globe presentations</h3>
+    <p>2D map and 3D globe present the same country learning item. Switching keeps your selected geographic point, and both use the same 25 km tolerance, proficiency, and review schedule. Rotating or zooming does not change your selected answer or count as location help.</p>
+    <p>On the globe, drag to rotate, scroll or pinch to zoom, and click or tap the earth to place a pin. You can also focus the globe and use arrow keys to rotate by 15°, +/− to zoom, and Enter or Space to select the centre. World view resets the view without clearing your pin. After checking, the target country is highlighted.</p>
+    <p>If 3D rendering is unavailable or interrupted, practice continues on the 2D map with your progress and selection intact. Show linked maps still reveals location and marks guided practice, including when you return to the globe. Both presentations use the same generalized boundaries; zooming does not add finer coastline detail.</p>
     <h3>Name-to-location reviews</h3>
     <p>Proficiency belongs to each country’s name-to-location skill, not to its capitals, facts, or other skills. On a new item, a miss means Learning and schedules a review in 10 minutes. A first success means Familiar and schedules a review in 1 day.</p>
     <p>Successful scheduled reviews extend the interval to 3, 7, 14, then 30 days (the maximum), and mark the skill Retained. A success after a miss restarts at Familiar and 1 day. Any missed review resets it to Learning and 10 minutes.</p>
@@ -130,6 +148,43 @@ let pendingPoint: L.LatLng | null = null;
 let marker: L.CircleMarker | undefined;
 let answerPolygon: L.Polygon | undefined;
 let linkedOpen = session.assisted;
+let globe: Globe | undefined;
+let globeOpen = false;
+const globeContainer = document.querySelector<HTMLElement>('#globe')!;
+const globeButton = document.querySelector<HTMLButtonElement>('#use-globe')!;
+const mapButton = document.querySelector<HTMLButtonElement>('#use-map')!;
+
+function changePresentation(useGlobe: boolean) {
+  const selection = pendingPoint;
+  globeOpen = useGlobe;
+  linkedOpen = false;
+  renderQuestion();
+  if (selection && !session.feedback) selectPoint(selection);
+}
+
+function globeUnavailable() {
+  globe?.dispose();
+  globe = undefined;
+  globeButton.disabled = true;
+  const notice = document.querySelector<HTMLElement>('#globe-notice')!;
+  notice.textContent = '3D rendering unavailable. Continue on the 2D map; your progress and selection are kept.';
+  notice.hidden = false;
+  changePresentation(false);
+  mapButton.focus();
+}
+
+globeButton.addEventListener('click', () => {
+  if (globeOpen) return;
+  try {
+    globe ??= new Globe(globeContainer, point => selectPoint(L.latLng(point.latitude, point.longitude)), globeUnavailable);
+    changePresentation(true);
+  } catch {
+    globeUnavailable();
+  }
+});
+mapButton.addEventListener('click', () => changePresentation(false));
+document.querySelector('#globe-zoom-in')!.addEventListener('click', () => globe?.zoom(0.8));
+document.querySelector('#globe-zoom-out')!.addEventListener('click', () => globe?.zoom(1.25));
 
 const map = L.map('map', {
   minZoom: 1, maxZoom: 10, zoomControl: false, zoomAnimation: false,
@@ -244,6 +299,14 @@ function renderQuestion() {
   document.querySelector<HTMLElement>('#welcome')!.hidden = session.started;
   const country = session.country;
   const answer = session.feedback;
+  if (linkedOpen) globeOpen = false;
+  app.classList.toggle('has-globe', globeOpen);
+  globeContainer.hidden = !globeOpen;
+  map.getContainer().hidden = globeOpen;
+  globeButton.setAttribute('aria-pressed', String(globeOpen));
+  mapButton.setAttribute('aria-pressed', String(!globeOpen));
+  globe?.setVisible(globeOpen);
+  globe?.showAnswer(answer ? country ?? undefined : undefined, answer ?? undefined);
   const showLinked = session.started && !!country && linkedOpen;
   app.classList.toggle('has-linked-maps', showLinked);
   document.querySelector<HTMLElement>('#linked-detail')!.hidden = !showLinked;
@@ -299,7 +362,7 @@ function renderQuestion() {
   }
   feedback.className = 'selection-hint';
   if (!answer) {
-    feedback.textContent = showLinked ? 'Select your location in the country close-up.' : 'Tap the map to place your pin.';
+    feedback.textContent = showLinked ? 'Select your location in the country close-up.' : globeOpen ? 'Rotate the globe, then click to place your pin.' : 'Tap the map to place your pin.';
     if (showLinked) linkedMaps.show(country);
     else map.setView([15, 0], app.clientWidth <= 700 ? 1 : 2, { animate: false });
     return;
@@ -311,7 +374,7 @@ function renderQuestion() {
     ? answer.correct ? 'Correct — guided practice.' : 'Not quite — guided practice.'
     : answer.correct ? 'Correct — well placed.' : 'Not quite — take another look.';
   const explanation = document.createElement('span');
-  explanation.textContent = `${country.properties.name} is highlighted on the map. ${answer.correct
+  explanation.textContent = `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${answer.correct
     ? 'Your selection is within the accepted geographic tolerance.'
     : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
   feedback.replaceChildren(result, explanation);
@@ -339,13 +402,14 @@ function renderQuestion() {
   marker = L.circleMarker([answer.latitude, answer.longitude], {
     radius: 7, weight: 3, color: '#111f2c', fillColor: answer.correct ? '#d6ef87' : '#ea947b', fillOpacity: 1, interactive: false,
   }).addTo(map);
-  focusAnswer();
+  if (!globeOpen) focusAnswer();
 }
 
 function selectPoint(point: L.LatLng) {
   if (!session.started || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 85) return;
   pendingPoint = point;
-  if (!linkedOpen) {
+  globe?.setSelection({ longitude: point.lng, latitude: point.lat });
+  if (!linkedOpen && !globeOpen) {
     if (marker) marker.setLatLng(point);
     else marker = L.circleMarker(point, { radius: 7, weight: 3, color: '#111f2c', fillColor: '#d6ef87', fillOpacity: 1, interactive: false }).addTo(map);
   }
@@ -389,6 +453,8 @@ document.querySelector('#reset-map')!.addEventListener('click', () => {
   if (linkedOpen) {
     linkedOpen = false;
     renderQuestion();
+  } else if (globeOpen) {
+    globe?.reset();
   } else {
     map.setView([15, 0], app.clientWidth <= 700 ? 1 : 2, { animate: false });
   }
