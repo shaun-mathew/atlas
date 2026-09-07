@@ -403,3 +403,16 @@ test('retrying a guided mistake preserves assistance without delaying the unassi
   await expect(proficiency).toContainText('Learning');
   await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-07T12:10:00.000Z');
 });
+
+test('linked maps retain regional context and answer controls on short screens', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 550 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  await page.getByRole('button', { name: 'Show linked maps' }).click();
+  await expect(page.getByRole('region', { name: 'Regional overview' }).getByText('India', { exact: true })).toBeVisible();
+  await page.getByRole('region', { name: 'Country close-up' }).click();
+  await page.getByRole('button', { name: 'Check location' }).click();
+  await expect(page.getByRole('status')).toContainText('Correct');
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(page.getByRole('heading', { name: /Åland/ })).toBeVisible();
+});

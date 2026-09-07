@@ -142,7 +142,7 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 .leaflet-control-scale-line { color: #c5d1d6; border-color: #81959d; background: #111e29b0; font-size: 10px; text-shadow: none; }
 .linked-country-label { pointer-events: none; }
 .linked-country-label span { display: block; transform: translate(-50%, -50%); width: max-content; max-width: 115px; text-align: center; color: #d1dde0; font: 10px/1.4 ui-monospace, monospace; text-shadow: 0 1px 3px #081720, 1px 0 3px #081720; }
-@media (max-width: 1000px) {
+@media (max-width: 1000px), (max-height: 700px) {
   .has-linked-maps .session-panel { top: auto; bottom: 24px; left: 16px; right: 16px; width: auto; max-height: 38dvh; padding: 16px; border: 1px solid #63777f66; border-radius: 16px; background: #14242ef5; }
   .has-linked-maps .prompt { display: inline; margin: 0 9px 0 0; font-size: 18px; }
   .has-linked-maps #session h1 { display: inline; font-size: 34px; letter-spacing: -1px; }
@@ -168,4 +168,19 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
   .has-linked-maps #linked-detail { top: calc(153px + (100dvh - 450px) / 2); bottom: calc(30dvh + 38px); left: 12px; right: 12px; }
   #detail-map { top: 23px; }
   .has-linked-maps .location-tools { margin-top: 10px; }
+}
+
+/* Short viewports scroll the practice flow instead of collapsing either map. */
+@media (max-height: 700px) {
+  #app.has-linked-maps { height: auto; min-height: 100dvh; padding-top: 460px; overflow: visible; }
+  .has-linked-maps #map { bottom: auto; height: 280px; }
+  .has-linked-maps #linked-detail { bottom: auto; height: 318px; }
+  .has-linked-maps .session-panel { position: relative; bottom: auto; left: auto; right: auto; max-height: none; margin: 0 16px 16px; }
+  .has-linked-maps .session-panel.is-answered { overflow: visible; }
+}
+@media (max-width: 600px) and (max-height: 700px) {
+  #app.has-linked-maps { padding-top: 552px; }
+  .has-linked-maps #map { height: 180px; }
+  .has-linked-maps #linked-detail { top: 333px; height: 203px; }
+  .has-linked-maps .session-panel { margin-right: 12px; margin-left: 12px; }
 }
