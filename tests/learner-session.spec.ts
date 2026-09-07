@@ -10,6 +10,58 @@ test('a guest starts a country name-to-location session without an account', asy
   await expect(page.getByRole('heading', { name: /Afghanistan/ })).toBeVisible();
   await expect(page.getByRole('region', { name: 'World map' })).toBeVisible();
 });
+test('a new learner can complete a diagnostic and continue into adaptive practice', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start diagnostic' }).click();
+  await expect(page.getByText('Diagnostic item', { exact: true })).toBeVisible();
+  for (let item = 0; item < 8; item += 1) {
+    await answerWorldPoint(page, 0, 0);
+    if (item < 7) await page.getByRole('button', { name: 'Next learning item' }).click();
+  }
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(page.getByRole('heading', { name: /Diagnostic complete/ })).toBeVisible();
+  await expect(page.getByText('8 answered · 0 correct', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Continue adaptive practice' }).click();
+  await expect(page.getByText('New learning item', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Antigua and Barbuda/ })).toBeVisible();
+});
+test('adaptive practice prioritizes a due review before a new country', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
+  await page.addInitScript(() => {
+    localStorage.setItem('atlas-practice.guest', JSON.stringify({
+      version: 2, started: true, cursor: 2, current: null,
+      attempts: [
+        {
+          countryId: 'AFG', skill: 'name-to-location', kind: 'new',
+          boundaryVersion: 'natural-earth-5.1.2-50m', longitude: 67, latitude: 34,
+          correct: true, selectedCountry: 'Afghanistan', answeredAt: '2026-09-06T12:00:00.000Z',
+        },
+        {
+          countryId: 'ALD', skill: 'name-to-location', kind: 'new',
+          boundaryVersion: 'natural-earth-5.1.2-50m', longitude: 25, latitude: 62,
+          correct: true, selectedCountry: 'Åland', answeredAt: '2026-09-07T12:00:00.000Z',
+        },
+      ],
+    }));
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Check due reviews' }).click();
+  await expect(page.getByRole('heading', { name: /Afghanistan/ })).toBeVisible();
+  await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
+});
+
+test('adaptive practice pauses new introductions after three items', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  await answerWorldPoint(page, 67, 34);
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await answerWorldPoint(page, 25, 62);
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await answerWorldPoint(page, 19.5, 41.3);
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(page.getByRole('heading', { name: /New items paused/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Check due reviews' })).toBeVisible();
+});
 
 // Select a geographic point through the rendered map, not an application back door.
 // The initial world view uses the standard Web Mercator projection at zoom 2.

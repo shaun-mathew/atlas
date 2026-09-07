@@ -28,7 +28,11 @@ app.innerHTML = `
       <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> Guest practice</p>
       <h1>A world worth knowing<span class="accent">.</span></h1>
       <p class="instructions">Build your geographic knowledge, one country at a time. No account needed.</p>
-      <div class="answer-dock"><button id="start" class="primary" type="button">Start country session <span aria-hidden="true">→</span></button><p class="local-note">Your progress stays in this browser.</p></div>
+      <div class="answer-dock">
+        <button id="start" class="primary" type="button">Start country session <span aria-hidden="true">→</span></button>
+        <button id="start-diagnostic" class="secondary" type="button">Start diagnostic</button>
+        <p class="local-note">Your progress stays in this browser.</p>
+      </div>
     </section>
     <section id="session" hidden>
       <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> <span id="question-kind">New learning item</span> <span id="question-number"></span></p>
@@ -58,14 +62,19 @@ app.innerHTML = `
       </div>
     </section>
     <section id="review-wait" hidden>
-      <p class="eyebrow">Country practice</p>
-      <h1>All caught up<span class="accent">.</span></h1>
-      <p class="instructions">Next review: <time id="next-review-at"></time></p>
+      <p class="eyebrow">Adaptive practice</p>
+      <h1 id="review-wait-title">All caught up<span class="accent">.</span></h1>
+      <p id="review-wait-instructions" class="instructions">Next review: <time id="next-review-at"></time></p>
       <div class="answer-dock"><button id="check-reviews" class="primary" type="button">Check due reviews</button></div>
+    </section>
+    <section id="diagnostic-complete" hidden>
+      <p class="eyebrow">Diagnostic complete</p>
+      <h1>Diagnostic complete<span class="accent">.</span></h1>
+      <p class="instructions">Your answers set the starting point for adaptive practice. It will prioritize due reviews, recent misses, and a small number of new items.</p>
+      <div class="answer-dock"><button id="start-adaptive" class="primary" type="button">Continue adaptive practice <span aria-hidden="true">→</span></button></div>
     </section>
     <p id="storage-notice" role="alert" hidden></p>
   </div>
-  <span class="map-caption" aria-hidden="true">A world worth knowing</span>
   <dialog id="geography-policy" aria-labelledby="policy-title">
     <button id="close-policy" class="secondary" type="button">Close</button>
     <h2 id="policy-title">Map coverage & review policy</h2>
@@ -76,7 +85,8 @@ app.innerHTML = `
     <h3>Name-to-location reviews</h3>
     <p>Proficiency belongs to each country’s name-to-location skill, not to its capitals, facts, or other skills. A miss means Learning and schedules a review in 10 minutes. A first success means Familiar and schedules a review in 1 day.</p>
     <p>Successful scheduled reviews extend the interval to 3, 7, 14, then 30 days (the maximum), and mark the skill Retained. A success after a miss restarts at Familiar and 1 day. Any missed review resets it to Learning and 10 minutes.</p>
-    <p>Retry now repeats the revealed learning item immediately. Retry answers count as practice, but do not change retention proficiency or postpone the scheduled review. Due reviews are selected oldest first, before unseen countries. When nothing is due and all countries have been introduced, practice waits for the next review. Review dates use your local time.</p>
+    <h3>Diagnostic and adaptive practice</h3>
+    <p>A diagnostic is an eight-item baseline across countries selected without asking you to predeclare knowledge. Diagnostic answers update the same name-to-location proficiency used by adaptive practice. Adaptive practice selects due reviews first, then allows up to three new country items per session; it pauses new introductions until reviews are due.</p>
     <h3>Linked-map location help</h3>
     <p>Show linked maps reveals the country in a regional overview and a separate close-up. Clicking the overview moves the close-up; dragging or zooming the close-up moves its outlined window without moving the overview. Select a location in the close-up and use Check location as usual.</p>
     <p>Using location help before answering marks that question as guided practice, even if you close the maps or reload. Guided answers are recorded separately from the correct-answer total, do not earn retention credit, and return the skill to Learning with an unassisted check in 10 minutes. Immediate retries keep that check unchanged. Exploring linked maps after an answer does not change its recorded result or review schedule.</p>
@@ -97,7 +107,9 @@ const policy = document.querySelector<HTMLDialogElement>('#geography-policy')!;
 const proficiency = document.querySelector<HTMLElement>('#proficiency')!;
 const reviewAt = document.querySelector<HTMLTimeElement>('#review-at')!;
 const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-const questionLabels = { new: 'New learning item', review: 'Scheduled review', retry: 'Immediate retry' };
+const questionLabels: Record<'new' | 'review' | 'retry' | 'diagnostic', string> = {
+  new: 'New learning item', review: 'Scheduled review', retry: 'Immediate retry', diagnostic: 'Diagnostic item',
+};
 let pendingPoint: L.LatLng | null = null;
 let marker: L.CircleMarker | undefined;
 let answerPolygon: L.Polygon | undefined;
@@ -213,7 +225,9 @@ function renderFactCard(countryId: string, version: string) {
 }
 
 function renderQuestion() {
+  const diagnosticComplete = session.diagnosticComplete;
   document.querySelector<HTMLElement>('#welcome')!.hidden = session.started;
+  document.querySelector<HTMLElement>('#diagnostic-complete')!.hidden = !diagnosticComplete;
   const country = session.country;
   const answer = session.feedback;
   const showLinked = session.started && !!country && linkedOpen;
@@ -225,11 +239,13 @@ function renderQuestion() {
     linkedMaps.hide();
     map.invalidateSize({ pan: false });
   }
-  document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
-  document.querySelector<HTMLElement>('#review-wait')!.hidden = !session.started || !!country;
+  document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country || diagnosticComplete;
+  document.querySelector<HTMLElement>('#review-wait')!.hidden = !session.started || !!country || diagnosticComplete;
   document.querySelector('#country')!.textContent = country?.properties.name ?? '';
   document.querySelector('#question-kind')!.textContent = session.questionKind ? questionLabels[session.questionKind] : '';
-  document.querySelector('#question-number')!.textContent = `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
+  document.querySelector('#question-number')!.textContent = session.diagnosticNumber
+    ? `Diagnostic ${session.diagnosticNumber}/${session.diagnosticTotal}`
+    : `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
   document.querySelector('#answered-count')!.textContent = String(session.attempts.length);
   document.querySelector('#correct-count')!.textContent = String(session.attempts.filter(attempt => attempt.correct && !attempt.assisted).length);
   const guidedCount = session.attempts.filter(attempt => attempt.assisted).length;
@@ -238,9 +254,9 @@ function renderQuestion() {
   guidedSummary.hidden = guidedCount === 0;
   const locationHelp = document.querySelector<HTMLButtonElement>('#location-help')!;
   locationHelp.textContent = answer ? 'Explore linked maps' : 'Show linked maps';
-  locationHelp.hidden = showLinked;
+  locationHelp.hidden = showLinked || session.mode === 'diagnostic';
   document.querySelector<HTMLElement>('#linked-actions')!.hidden = !showLinked;
-  document.querySelector<HTMLElement>('#help-warning')!.hidden = !!answer || showLinked || session.assisted;
+  document.querySelector<HTMLElement>('#help-warning')!.hidden = !!answer || showLinked || session.assisted || session.mode === 'diagnostic';
   document.querySelector<HTMLElement>('#guided-note')!.hidden = !session.assisted;
   document.querySelector('#detail-instructions')!.textContent = answer ? 'Answer recorded · drag or zoom to explore' : 'Drag or zoom, then click to select';
   storageNotice.textContent = session.storageNotice;
@@ -254,7 +270,7 @@ function renderQuestion() {
   factCard.hidden = true;
   factCard.replaceChildren();
   next.hidden = !answer;
-  retry.hidden = !answer || answer.correct;
+  retry.hidden = !answer || answer.correct || session.mode === 'diagnostic';
   document.querySelector<HTMLElement>('#retry-note')!.hidden = session.questionKind !== 'retry';
   check.hidden = !!answer;
   check.disabled = true;
@@ -270,6 +286,12 @@ function renderQuestion() {
     const nextReview = document.querySelector<HTMLTimeElement>('#next-review-at')!;
     nextReview.dateTime = dueAt ?? '';
     nextReview.textContent = dueAt ? dateFormatter.format(new Date(dueAt)) : '';
+    const waitTitle = document.querySelector<HTMLElement>('#review-wait-title')!;
+    const waitInstructions = document.querySelector<HTMLElement>('#review-wait-instructions')!;
+    waitTitle.firstChild!.textContent = session.adaptivePaused ? 'New items paused' : 'All caught up';
+    waitInstructions.firstChild!.textContent = session.adaptivePaused
+      ? 'New items resume after a review. Next review: '
+      : 'Next review: ';
     map.setView([15, 0], app.clientWidth <= 700 ? 1 : 2, { animate: false });
     return;
   }
@@ -333,6 +355,16 @@ map.on('click', (event: L.LeafletMouseEvent) => {
 });
 document.querySelector('#start')!.addEventListener('click', () => {
   session.start();
+  linkedOpen = false;
+  renderQuestion();
+});
+document.querySelector('#start-diagnostic')!.addEventListener('click', () => {
+  session.startDiagnostic();
+  linkedOpen = false;
+  renderQuestion();
+});
+document.querySelector('#start-adaptive')!.addEventListener('click', () => {
+  session.startAdaptive();
   linkedOpen = false;
   renderQuestion();
 });
