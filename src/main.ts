@@ -21,8 +21,9 @@ app.innerHTML = `
     <small class="globe-attribution">Natural Earth · Public domain</small>
   </section>
   <div class="presentation-tools" role="group" aria-label="Map presentation">
-    <button id="use-map" class="secondary" type="button" aria-pressed="true">2D map</button>
-    <button id="use-globe" class="secondary" type="button" aria-pressed="false">3D globe</button>
+    <button id="toggle-presentation" class="secondary" type="button" aria-label="Switch to 3D globe" data-presentation="map">
+      <span class="map-label">2D</span><span class="presentation-divider" aria-hidden="true">|</span><span class="globe-label">3D</span>
+    </button>
     <span id="globe-notice" role="alert" hidden></span>
   </div>
   <div id="overview-label" class="linked-map-heading" hidden><span>Regional overview</span><small>Click to move the close-up</small></div>
@@ -36,12 +37,9 @@ app.innerHTML = `
       <svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="13" stroke="currentColor" stroke-width="1.2"/><path d="m21 10-3 9-8 3 3-9 8-3Z" stroke="currentColor" stroke-width="1.2"/><path d="m21 10-8 3 5 6 3-9Z" fill="currentColor"/></svg>
       <span>Atlas<span class="brand-subtitle">A little further, every day.</span></span>
     </a>
-    <div class="map-actions">
-      <button id="reset-map" class="secondary" type="button" aria-label="World view"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg><span class="world-view-label">World view</span></button>
-      <button id="map-info" class="secondary info-button" type="button" aria-label="Map coverage and review policy">i</button>
       <button id="open-profile" class="secondary profile-button" type="button" aria-label="Profile" title="Guest profile"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="6" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M4 17v-2a6 6 0 0 1 12 0v2" stroke="currentColor" stroke-width="1.5"/></svg></button>
-    </div>
   </header>
+    <button id="reset-map" class="secondary" type="button" aria-label="World view" title="World view"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg></button>
   <nav class="learning-modes" aria-label="Learning mode">
     <button id="adaptive-mode" class="secondary" type="button" aria-pressed="true">Recommended practice</button>
     <button id="facet-mode" class="secondary" type="button" aria-pressed="false">Custom practice</button>
@@ -91,36 +89,6 @@ app.innerHTML = `
     </section>
     <p id="storage-notice" role="alert" hidden></p>
   </div>
-  <dialog id="geography-policy" class="app-dialog" aria-labelledby="policy-title">
-    <button id="close-policy" class="secondary dialog-close" type="button">Close</button>
-    <h2 id="policy-title">Map coverage & review policy</h2>
-    <p>Points inside the target boundary or within 25 km are accepted, unless they fall inside another mapped country or territory.</p>
-    <p>241 countries and territories, excluding Antarctica. Public-domain <a href="https://www.naturalearthdata.com/about/terms-of-use/">Natural Earth</a> 5.1.2, 1:50m Admin-0 boundaries, retrieved 7 September 2026.</p>
-    <p>We use its de facto boundaries and mapped territories; inclusion does not imply political recognition. Small islands and borders are generalized. This is a fixed learning dataset, not a source of legal boundaries.</p>
-    <p>Drag to explore, use + and − to zoom, and select a point before checking your answer. Guest progress is saved in this browser, not across devices. Open Profile to see your identity or reset learning progress. Resetting requires confirmation and clears this app’s answers, proficiency, and reviews; it does not clear unrelated browser data.</p>
-    <h3>Map and globe presentations</h3>
-    <p>2D map and 3D globe present the same country learning item. Switching keeps your selected geographic point, and both use the same 25 km tolerance, proficiency, and review schedule. Rotating or zooming does not change your selected answer or count as location help.</p>
-    <p>On the globe, drag to rotate, scroll or pinch to zoom, and click or tap the earth to place a pin. You can also focus the globe and use arrow keys to rotate by 15°, +/− to zoom, and Enter or Space to select the centre. World view resets the view without clearing your pin. After checking, the target country is highlighted.</p>
-    <p>If 3D rendering is unavailable or interrupted, practice continues on the 2D map with your progress and selection intact. Show location still reveals location and marks guided practice, including when you return to the globe. Both presentations use the same generalized boundaries; zooming does not add finer coastline detail.</p>
-    <h3>Name-to-location reviews</h3>
-    <p>Proficiency belongs to each country’s name-to-location skill, not to its capitals, facts, or other skills. On a new item, a miss means Learning and schedules a review in 10 minutes. A first success means Familiar and schedules a review in 1 day.</p>
-    <p>Successful scheduled reviews extend the interval to 3, 7, 14, then 30 days (the maximum), and mark the skill Retained. A success after a miss restarts at Familiar and 1 day. Any missed review resets it to Learning and 10 minutes.</p>
-    <h3>Country difficulty progression</h3>
-    <p>New introductions begin with 16 recognizable countries across several regions, starting with Brazil, China, Australia, and India. Remaining countries and territories progress from larger to smaller main landmasses, leaving tiny islands and microstates until later. This is a map-selection difficulty guide, not a ranking of importance. Existing questions and due reviews are preserved; reset your learning progress if you want a fresh start.</p>
-    <h3>Recommended practice</h3>
-    <p>Practice starts directly and adapts as you answer. Due reviews are selected oldest first. Otherwise, new countries are mixed with practice revisits: after two new introductions, an eligible previously seen country is selected, favoring its latest missed or guided answer, then the country least recently answered. Revisits normally have at least two intervening answers; new countries fill the gap while no revisit is eligible. Once every country has been introduced, practice continues with revisits. Stop whenever you like and resume from your saved question.</p>
-    <p>Practice revisits reinforce countries before their scheduled review. Their answers affect revisit selection, but do not change retention proficiency or review dates. Immediate retries also leave retention unchanged, and do not erase a miss when selecting future revisits. There are no batch limits or waiting screens.</p>
-    <h3>Custom practice and geographic filters</h3>
-    <p>Custom practice guides you through Places, Geography, and Learning. Choose Countries & territories, a continent or region, and an available learning option. Your practice selection stays visible above the question. Edit practice set reopens the setup; Cancel or Escape leaves the active session unchanged. Selections and the current item resume when you reload.</p>
-    <p>Name-to-location practice uses the same answers, proficiency, review dates, and country progression as recommended practice, restricted to your chosen places. Due reviews inside the selection come first; reviews outside it remain scheduled. Returning to Recommended practice includes all countries again. Unanswered questions keep their original kind and any location help when their country is selected again, even after switching sets or reloading.</p>
-    <p>Country fact cards is a reading option: browse the existing sourced, versioned facts for your selected countries with Next fact card. Reading is informational, not an assessed skill; it records no answers and does not advance proficiency or reschedule reviews. Population remains informational. Switching to reading does not discard the pending spatial question.</p>
-    <p>The reading map reveals the displayed country’s location. If that country has an unanswered spatial question, the question keeps this exposure as location help, including while it is paused outside the active practice set. Reading alone still changes no proficiency or review dates; the eventual answer follows the guided-practice policy.</p>
-    <p>Continental groups use each place’s Natural Earth region, including transcontinental countries. Worldwide includes all 241 mapped places; Open ocean keeps territories outside continental groups accessible. Choosing another continent resets the region to All regions. In a small practice set, revisits may occur sooner once every place in that set has been introduced, without advancing retention before a scheduled review.</p>
-    <h3>Location help</h3>
-    <p>Show location reveals the country in a regional overview and a separate close-up. Clicking the overview moves the close-up; dragging or zooming the close-up moves its outlined window without moving the overview. Select a location in the close-up and use Check location as usual. Back to world map returns to the full map.</p>
-    <p>Using location help before answering marks that question as guided practice, even if you close the maps or reload. Guided answers are recorded separately from the correct-answer total and do not earn retention credit. On new items and scheduled reviews, they return the skill to Learning with an unassisted check in 10 minutes. Practice revisits and immediate retries leave the existing review schedule unchanged. Explore location is available after an answer and does not change its recorded result or review schedule.</p>
-    <p>The close-up starts on the largest mapped land mass rather than fitting distant outlying islands. Very large countries start on a smaller area within that land mass. Nearby larger land masses provide regional context where available. These are the same generalized Natural Earth boundaries; zooming does not add finer coastline detail. Back to the country restores both views.</p>
-  </dialog>
   <dialog id="profile-dialog" class="app-dialog" aria-labelledby="profile-title">
     <button id="close-profile" class="secondary dialog-close" type="button">Close</button>
     <h2 id="profile-title">Your profile</h2>
@@ -149,7 +117,6 @@ const check = document.querySelector<HTMLButtonElement>('#check')!;
 const next = document.querySelector<HTMLButtonElement>('#next')!;
 const retry = document.querySelector<HTMLButtonElement>('#retry')!;
 const storageNotice = document.querySelector<HTMLParagraphElement>('#storage-notice')!;
-const policy = document.querySelector<HTMLDialogElement>('#geography-policy')!;
 const profile = document.querySelector<HTMLDialogElement>('#profile-dialog')!;
 const resetRequest = document.querySelector<HTMLButtonElement>('#request-reset')!;
 const resetConfirmation = document.querySelector<HTMLElement>('#reset-confirmation')!;
@@ -167,30 +134,36 @@ let linkedOpen = session.assisted;
 let globe: Globe | undefined;
 let globeOpen = false;
 const globeContainer = document.querySelector<HTMLElement>('#globe')!;
-const globeButton = document.querySelector<HTMLButtonElement>('#use-globe')!;
-const mapButton = document.querySelector<HTMLButtonElement>('#use-map')!;
+const presentationButton = document.querySelector<HTMLButtonElement>('#toggle-presentation')!;
+const presentationTools = document.querySelector<HTMLElement>('.presentation-tools')!;
+const worldViewButton = document.querySelector<HTMLButtonElement>('#reset-map')!;
 
 function changePresentation(useGlobe: boolean) {
   const selection = pendingPoint;
+  const focusedControl = presentationTools.contains(document.activeElement) ? document.activeElement as HTMLElement : null;
   globeOpen = useGlobe;
   linkedOpen = false;
   renderQuestion();
   if (selection && !session.feedback) selectPoint(selection);
+  focusedControl?.focus({ preventScroll: true });
 }
 
 function globeUnavailable() {
   globe?.dispose();
   globe = undefined;
-  globeButton.disabled = true;
+  presentationButton.disabled = true;
   const notice = document.querySelector<HTMLElement>('#globe-notice')!;
   notice.textContent = '3D rendering unavailable. Continue on the 2D map; your progress and selection are kept.';
   notice.hidden = false;
   changePresentation(false);
-  mapButton.focus();
+  map.getContainer().focus({ preventScroll: true });
 }
 
-globeButton.addEventListener('click', () => {
-  if (globeOpen) return;
+presentationButton.addEventListener('click', () => {
+  if (globeOpen) {
+    changePresentation(false);
+    return;
+  }
   try {
     globe ??= new Globe(globeContainer, point => selectPoint(L.latLng(point.latitude, point.longitude)), globeUnavailable);
     changePresentation(true);
@@ -198,7 +171,6 @@ globeButton.addEventListener('click', () => {
     globeUnavailable();
   }
 });
-mapButton.addEventListener('click', () => changePresentation(false));
 document.querySelector('#globe-zoom-in')!.addEventListener('click', () => globe?.zoom(0.8));
 document.querySelector('#globe-zoom-out')!.addEventListener('click', () => globe?.zoom(1.25));
 
@@ -208,6 +180,25 @@ const map = L.map('map', {
   maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1,
 }).setView([15, 0], app.clientWidth <= 700 ? 1 : 2);
 L.control.zoom({ position: 'topright' }).addTo(map);
+const presentationControl = new L.Control({ position: 'topright' });
+presentationControl.onAdd = () => presentationTools;
+L.DomEvent.disableClickPropagation(presentationTools);
+L.DomEvent.disableScrollPropagation(presentationTools);
+presentationControl.addTo(map);
+// Keep the mobile reset icon above the question card, at the visible map's bottom.
+const worldViewPosition = new ResizeObserver(() => {
+  if (app.clientWidth > 700) return;
+  const surface = (globeOpen ? globeContainer : map.getContainer()).getBoundingClientRect();
+  const container = app.getBoundingClientRect();
+  const bottom = !globeOpen && !app.classList.contains('has-linked-maps')
+    ? Math.min(surface.bottom, panel.getBoundingClientRect().top)
+    : surface.bottom;
+  worldViewButton.style.setProperty('--map-control-top', `${bottom - container.top - (globeOpen ? 58 : 46)}px`);
+  worldViewButton.style.setProperty('--map-control-right', `${container.right - surface.right + 12}px`);
+});
+worldViewPosition.observe(panel);
+worldViewPosition.observe(map.getContainer());
+worldViewPosition.observe(globeContainer);
 map.attributionControl.addAttribution('Natural Earth · Public domain');
 const boundaries = L.geoJSON(countries, {
   style: { color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1 },
@@ -326,8 +317,14 @@ function renderQuestion() {
   app.classList.toggle('has-globe', globeOpen);
   globeContainer.hidden = !globeOpen;
   map.getContainer().hidden = globeOpen;
-  globeButton.setAttribute('aria-pressed', String(globeOpen));
-  mapButton.setAttribute('aria-pressed', String(!globeOpen));
+  if (globeOpen && presentationTools.parentElement !== globeContainer) {
+    presentationControl.remove();
+    globeContainer.append(presentationTools);
+  } else if (!globeOpen && !map.getContainer().contains(presentationTools)) {
+    presentationControl.addTo(map);
+  }
+  presentationButton.dataset.presentation = globeOpen ? 'globe' : 'map';
+  presentationButton.setAttribute('aria-label', presentationButton.disabled ? '3D globe unavailable' : globeOpen ? 'Switch to 2D map' : 'Switch to 3D globe');
   globe?.setVisible(globeOpen);
   globe?.showAnswer(answer || reading ? country ?? undefined : undefined, answer ?? undefined);
   const showLinked = session.started && !!country && linkedOpen && !reading;
@@ -494,8 +491,6 @@ document.querySelector('#reset-map')!.addEventListener('click', () => {
     map.setView([15, 0], app.clientWidth <= 700 ? 1 : 2, { animate: false });
   }
 });
-document.querySelector('#map-info')!.addEventListener('click', () => policy.showModal());
-document.querySelector('#close-policy')!.addEventListener('click', () => policy.close());
 document.querySelector('#open-profile')!.addEventListener('click', () => {
   document.querySelector('#profile-progress')!.textContent = `${session.attempts.length} answers in this guest profile.`;
   resetConfirmation.hidden = true;

@@ -20,7 +20,10 @@ test('rotating and zooming the globe preserves a country answer across presentat
   await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
-  await page.getByRole('button', { name: '3D globe', exact: true }).click();
+  const globeToggle = page.getByRole('group', { name: 'Map presentation' }).getByRole('button');
+  await globeToggle.focus();
+  await globeToggle.press('Enter');
+  await expect(globeToggle).toBeFocused();
   const globe = page.getByRole('application', { name: 'Interactive globe' });
   await expect(globe).toBeVisible();
   await globe.focus();
@@ -36,17 +39,18 @@ test('rotating and zooming the globe preserves a country answer across presentat
   await page.getByRole('button', { name: 'Zoom in on globe' }).click();
   await globe.press('ArrowRight');
   await expect(page.getByRole('status')).toContainText('15.0° S / 60.0° W');
-  await page.getByRole('button', { name: '2D map', exact: true }).click();
+  await page.getByRole('button', { name: 'Switch to 2D map', exact: true }).click();
+  await expect(globeToggle).toBeFocused();
   await expect(page.getByRole('region', { name: 'World map', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByRole('status')).toContainText('15.0° S / 60.0° W');
-  await page.getByRole('button', { name: '3D globe', exact: true }).click();
+  await page.getByRole('button', { name: 'Switch to 3D globe', exact: true }).click();
   await page.getByRole('button', { name: 'Check location' }).click();
   await expect(page.getByRole('status')).toContainText('Correct');
   const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
   await expect(proficiency).toContainText('Familiar');
   await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-08T12:00:00.000Z');
-  await page.getByRole('button', { name: '2D map', exact: true }).click();
+  await page.getByRole('button', { name: 'Switch to 2D map', exact: true }).click();
   await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();
   await page.reload();
   await expect(proficiency).toContainText('Familiar');
@@ -61,7 +65,7 @@ test('rotating and zooming the globe preserves a country answer across presentat
   await page.getByRole('button', { name: 'Check location' }).click();
   await expect(proficiency).toContainText('Retained');
   await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-11T12:00:00.000Z');
-  await page.getByRole('button', { name: '3D globe', exact: true }).click();
+  await page.getByRole('button', { name: 'Switch to 3D globe', exact: true }).click();
   await expect(proficiency).toContainText('Retained');
   await expect(page.getByText('2 answered · 2 correct', { exact: true })).toBeVisible();
 });
@@ -69,7 +73,7 @@ test('rotating and zooming the globe preserves a country answer across presentat
 test('globe exploration never submits a drag or a click outside the earth', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
-  await page.getByRole('button', { name: '3D globe', exact: true }).click();
+  await page.getByRole('button', { name: 'Switch to 3D globe', exact: true }).click();
   const globe = page.getByRole('application', { name: 'Interactive globe' });
   const box = (await globe.boundingBox())!;
   await page.mouse.click(box.x + 5, box.y + 5);
@@ -93,7 +97,7 @@ test.describe('globe geographic tolerance', () => {
       current: { countryId: 'ALB', kind: 'new', assisted: false },
     })));
     await page.goto('/');
-    await page.getByRole('button', { name: '3D globe', exact: true }).click();
+    await page.getByRole('button', { name: 'Switch to 3D globe', exact: true }).click();
     const globe = page.getByRole('application', { name: 'Interactive globe' });
     await globe.press('ArrowRight');
     await globe.press('ArrowUp');
@@ -135,9 +139,11 @@ test('unavailable WebGL leaves the pending map answer usable', async ({ page }) 
   // Brazil at the standard Mercator world view.
   const mercatorY = (latitude: number) => (1 - Math.asinh(Math.tan(latitude * Math.PI / 180)) / Math.PI) * 512;
   await page.mouse.click(box.x + 128 / 360 * 1024 - Math.round(512 - box.width / 2), box.y + mercatorY(-12) - Math.round(mercatorY(15) - box.height / 2));
-  await page.getByRole('button', { name: '3D globe', exact: true }).click();
+  await page.getByRole('button', { name: 'Switch to 3D globe', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('3D rendering unavailable');
   await expect(page.getByRole('region', { name: 'World map', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'World map', exact: true })).toBeFocused();
+  await expect(page.getByRole('button', { name: '3D globe unavailable' })).toBeDisabled();
   await page.getByRole('button', { name: 'Check location' }).click();
   await expect(page.getByRole('status')).toContainText('Correct');
   await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();
@@ -146,7 +152,7 @@ test('unavailable WebGL leaves the pending map answer usable', async ({ page }) 
 test('lost WebGL preserves the globe pin and continues on the map', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
-  await page.getByRole('button', { name: '3D globe', exact: true }).click();
+  await page.getByRole('button', { name: 'Switch to 3D globe', exact: true }).click();
   await clickGlobePoint(page, -52, -12);
   await page.getByRole('application', { name: 'Interactive globe' }).evaluate(element => {
     const context = (element as HTMLCanvasElement).getContext('webgl2')!;
@@ -167,7 +173,7 @@ test('switching away from location help cannot earn unassisted globe credit', as
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
   await page.getByRole('button', { name: 'Show location', exact: true }).click();
-  await page.getByRole('button', { name: '3D globe', exact: true }).click();
+  await page.getByRole('button', { name: 'Switch to 3D globe', exact: true }).click();
   await clickGlobePoint(page, -52, -12);
   await page.getByRole('button', { name: 'Check location' }).click();
   await expect(page.getByRole('status')).toContainText('Correct — guided practice');
@@ -180,7 +186,7 @@ test('switching away from location help cannot earn unassisted globe credit', as
 test('a polar globe selection is evaluated and survives a reload', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
-  await page.getByRole('button', { name: '3D globe', exact: true }).click();
+  await page.getByRole('button', { name: 'Switch to 3D globe', exact: true }).click();
   const globe = page.getByRole('application', { name: 'Interactive globe' });
   await clickGlobePoint(page, -52, -12);
   for (let turn = 0; turn < 4; turn++) await globe.press('ArrowUp');
