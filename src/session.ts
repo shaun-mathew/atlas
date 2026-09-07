@@ -1,7 +1,7 @@
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 import { pointToPolygonDistance } from '@turf/point-to-polygon-distance';
 import { z } from 'zod';
-import { countries } from './geography';
+import { countries, introductionOrder } from './geography';
 import { factVersion } from './facts';
 
 const countriesById = new Map(countries.map(country => [country.properties.id, country]));
@@ -29,7 +29,7 @@ const legacyProgressSchema = z.object({
   && (state.started || (state.cursor === 0 && state.attempts.length === 0))
   && state.attempts.every((attempt, index) => attempt.countryId === countries[index % countries.length].properties.id),
 );
-const questionKindSchema = z.enum(['new', 'review', 'retry', 'diagnostic']);
+const questionKindSchema = z.enum(['new', 'review', 'practice', 'retry', 'diagnostic']);
 const questionSchema = z.object({
   countryId: countryIdSchema,
   kind: questionKindSchema,
@@ -52,14 +52,13 @@ const diagnosticSchema = z.object({
   index: z.number().int().nonnegative(),
 });
 const progressSchema = z.object({
-  version: z.literal(3),
+  version: z.literal(4),
   started: z.boolean(),
   cursor: z.number().int().nonnegative(),
   current: questionSchema.nullable(),
   attempts: z.array(attemptSchema.extend({ kind: questionKindSchema })),
   mode: z.enum(['adaptive', 'diagnostic']),
   diagnostic: diagnosticSchema.nullable(),
-  newItemsThisSession: z.number().int().nonnegative(),
 }).refine(state => {
   const answer = state.attempts[state.cursor];
   return (state.attempts.length === state.cursor || state.attempts.length === state.cursor + 1)
@@ -78,17 +77,22 @@ type Proficiency = {
 const reviewIntervals = [1, 3, 7, 14, 30];
 const day = 24 * 60 * 60 * 1000;
 const diagnosticItemCount = 8;
-const maxNewItemsPerSession = 3;
+
+function initialState(): z.infer<typeof progressSchema> {
+  return {
+    version: 4, started: false, cursor: 0, attempts: [],
+    current: { countryId: introductionOrder[0].properties.id, kind: 'new', assisted: false },
+    mode: 'adaptive', diagnostic: null,
+  };
+}
 
 // Attempts are the durable source of skill proficiency and scheduling state.
 // Replaying them also upgrades older saves without discarding learner history.
 export class GuestSession {
-  private state: z.infer<typeof progressSchema> = {
-    version: 3, started: false, cursor: 0, attempts: [],
-    current: { countryId: countries[0].properties.id, kind: 'new', assisted: false },
-    mode: 'adaptive', diagnostic: null, newItemsThisSession: 0,
-  };
+  private state = initialState();
   private learningItems = new Map<string, Proficiency>();
+  private selectionHistory = new Map<string, { lastSeenIndex: number; weak: boolean }>();
+  private introductionsSinceRevisit = 0;
   storageNotice = '';
 
   constructor() {
@@ -99,7 +103,7 @@ export class GuestSession {
       if (parsed.version === 1) {
         const legacy = legacyProgressSchema.parse(parsed);
         this.state = {
-          ...legacy, version: 3,
+          ...legacy, version: 4,
           current: {
             countryId: countries[legacy.cursor % countries.length].properties.id,
             kind: 'new',
@@ -108,21 +112,24 @@ export class GuestSession {
           attempts: legacy.attempts.map(attempt => ({ ...attempt, kind: 'new' as const })),
           mode: 'adaptive',
           diagnostic: null,
-          newItemsThisSession: 0,
         };
       } else if (parsed.version === 2) {
         const legacy = progressV2Schema.parse(parsed);
         this.state = {
           ...legacy,
-          version: 3,
+          version: 4,
           mode: 'adaptive',
           diagnostic: null,
-          newItemsThisSession: 0,
         };
       } else {
-        this.state = progressSchema.parse(parsed);
+        // Version 3's obsolete session cap is discarded by the current schema.
+        this.state = progressSchema.parse(parsed.version === 3 ? { ...parsed, version: 4 } : parsed);
       }
-      for (const attempt of this.attempts) this.updateProficiency(attempt);
+      if (!this.started) this.state = initialState();
+      this.attempts.forEach((attempt, index) => this.recordAttempt(attempt, index));
+      const waiting = this.started && this.state.mode === 'adaptive' && !this.state.current;
+      if (waiting) this.state.current = this.selectAdaptive(new Date().toISOString());
+      if (waiting || parsed.version !== 4) this.save();
     } catch {
       this.storageNotice = 'Saved guest progress could not be read. Starting a session will replace any unreadable save. Browser storage must be available to retain new progress.';
     }
@@ -144,38 +151,44 @@ export class GuestSession {
       : undefined;
   }
   get diagnosticTotal() { return this.state.diagnostic?.countries.length; }
-  get adaptivePaused() { return this.state.mode === 'adaptive' && this.state.newItemsThisSession >= maxNewItemsPerSession; }
   get questionKind() { return this.state.current?.kind; }
   get assisted() { return this.state.current?.assisted ?? false; }
   get country() { return this.state.current ? countriesById.get(this.state.current.countryId)! : null; }
   get feedback() { return this.attempts[this.cursor]; }
   get proficiency() { return this.state.current ? this.learningItems.get(`${this.state.current.countryId}:name-to-location`) : undefined; }
-  get nextReviewAt() {
-    let earliest: string | undefined;
-    for (const item of this.learningItems.values()) {
-      if (!earliest || item.dueAt < earliest) earliest = item.dueAt;
+
+  reset(): boolean {
+    const fresh = initialState();
+    try {
+      // Persist first: a failed write must leave the active session intact.
+      localStorage.setItem('atlas-practice.guest', JSON.stringify(fresh));
+    } catch {
+      this.storageNotice = 'Learning progress could not be reset because browser storage is unavailable or full. Your existing progress has been kept.';
+      return false;
     }
-    return earliest;
+    this.state = fresh;
+    this.learningItems.clear();
+    this.selectionHistory.clear();
+    this.introductionsSinceRevisit = 0;
+    this.storageNotice = '';
+    return true;
   }
 
   start() {
     this.state.started = true;
     this.state.mode = 'adaptive';
     this.state.diagnostic = null;
-    if (this.state.current?.kind === 'new' && this.state.newItemsThisSession === 0) {
-      this.state.newItemsThisSession = 1;
-    }
+    if (!this.state.current) this.state.current = this.selectAdaptive(new Date().toISOString());
     this.save();
   }
 
   startDiagnostic() {
-    const diagnosticCountries = countries.slice(0, diagnosticItemCount).map(country => country.properties.id);
+    const diagnosticCountries = introductionOrder.slice(0, diagnosticItemCount).map(country => country.properties.id);
     this.state.started = true;
     this.state.mode = 'diagnostic';
     this.state.cursor = this.attempts.length;
     this.state.diagnostic = { countries: diagnosticCountries, index: 0 };
     this.state.current = { countryId: diagnosticCountries[0], kind: 'diagnostic', assisted: false };
-    this.state.newItemsThisSession = 0;
     this.save();
   }
 
@@ -184,7 +197,6 @@ export class GuestSession {
     this.state.mode = 'adaptive';
     this.state.diagnostic = null;
     this.state.cursor = this.attempts.length;
-    this.state.newItemsThisSession = 0;
     this.state.current = this.selectAdaptive(new Date().toISOString());
     this.save();
   }
@@ -205,8 +217,8 @@ export class GuestSession {
   }
 
   private updateProficiency(attempt: Attempt) {
-    // Repeating a revealed answer records practice, not evidence of retention.
-    if (attempt.kind === 'retry') return;
+    // Immediate retries and extra practice do not measure scheduled retention.
+    if (attempt.kind === 'retry' || attempt.kind === 'practice') return;
     const key = `${attempt.countryId}:${attempt.skill}`;
     const previous = this.learningItems.get(key);
     const unassistedSuccess = attempt.correct && !attempt.assisted;
@@ -220,6 +232,22 @@ export class GuestSession {
       intervalDays,
       dueAt: new Date(Date.parse(attempt.answeredAt) + (unassistedSuccess ? intervalDays * day : 10 * 60 * 1000)).toISOString(),
     });
+  }
+
+  private recordAttempt(attempt: Attempt, index: number) {
+    this.updateProficiency(attempt);
+    let history = this.selectionHistory.get(attempt.countryId);
+    if (!history) {
+      history = { lastSeenIndex: index, weak: false };
+      this.selectionHistory.set(attempt.countryId, history);
+    } else {
+      history.lastSeenIndex = index;
+    }
+    // Retries delay this country's next revisit without erasing its weakness.
+    if (attempt.kind === 'retry') return;
+    history.weak = !attempt.correct || attempt.assisted;
+    if (attempt.kind === 'new') this.introductionsSinceRevisit += 1;
+    else this.introductionsSinceRevisit = 0;
   }
 
   answer(longitude: number, latitude: number) {
@@ -242,7 +270,7 @@ export class GuestSession {
       answeredAt: new Date().toISOString(),
     };
     this.attempts.push(attempt);
-    this.updateProficiency(attempt);
+    this.recordAttempt(attempt, this.attempts.length - 1);
     this.save();
   }
 
@@ -254,18 +282,40 @@ export class GuestSession {
   }
 
   private selectAdaptive(now: string) {
-    let due: { countryId: string; dueAt: string } | undefined;
-    let unseen: string | undefined;
+    let dueCountryId: string | undefined;
+    let earliestDueAt: string | undefined;
+    let revisitCountryId: string | undefined;
+    let revisitHistory: { lastSeenIndex: number; weak: boolean } | undefined;
+    let oldestCountryId: string | undefined;
+    let oldestSeenIndex = Infinity;
     for (const country of countries) {
       const countryId = country.properties.id;
       const item = this.learningItems.get(`${countryId}:name-to-location`);
-      if (!item) unseen ??= countryId;
-      else if (item.dueAt <= now && (!due || item.dueAt < due.dueAt)) due = { countryId, dueAt: item.dueAt };
+      if (item && item.dueAt <= now && (!earliestDueAt || item.dueAt < earliestDueAt)) {
+        dueCountryId = countryId;
+        earliestDueAt = item.dueAt;
+      }
+      const history = this.selectionHistory.get(countryId);
+      if (!history) continue;
+      if (history.lastSeenIndex < oldestSeenIndex) {
+        oldestCountryId = countryId;
+        oldestSeenIndex = history.lastSeenIndex;
+      }
+      if (this.attempts.length - history.lastSeenIndex > 2
+        && (!revisitHistory || (history.weak && !revisitHistory.weak)
+          || (history.weak === revisitHistory.weak && history.lastSeenIndex < revisitHistory.lastSeenIndex))) {
+        revisitCountryId = countryId;
+        revisitHistory = history;
+      }
     }
-    if (due) return { countryId: due.countryId, kind: 'review' as const, assisted: false };
-    if (this.state.newItemsThisSession >= maxNewItemsPerSession || !unseen) return null;
-    this.state.newItemsThisSession += 1;
-    return { countryId: unseen, kind: 'new' as const, assisted: false };
+    if (dueCountryId) return { countryId: dueCountryId, kind: 'review' as const, assisted: false };
+    const unseenCountryId = introductionOrder.find(country => !this.selectionHistory.has(country.properties.id))?.properties.id;
+    if (revisitCountryId && (this.introductionsSinceRevisit >= 2 || !unseenCountryId)) {
+      return { countryId: revisitCountryId, kind: 'practice' as const, assisted: false };
+    }
+    if (unseenCountryId) return { countryId: unseenCountryId, kind: 'new' as const, assisted: false };
+    // With no unseen countries, at least one answered country must exist.
+    return { countryId: oldestCountryId!, kind: 'practice' as const, assisted: false };
   }
 
   next() {

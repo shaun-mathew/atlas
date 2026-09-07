@@ -19,6 +19,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .fact-card:focus-v
 .secondary > svg { width: 18px; height: 18px; }
 .secondary:hover { background: #2b3d47; border-color: #ffffff4d; }
 .info-button { width: 38px; padding: 0; font-family: Georgia, serif; font-style: italic; font-size: 17px; }
+.profile-button { width: 40px; padding: 0; }
 .progress { position: absolute; top: calc(32px + env(safe-area-inset-top, 0px)); right: 34px; z-index: 2; margin: 0; color: var(--muted); font-size: 11px; pointer-events: none; }
 .progress > span:not(.progress-divider) { margin-right: 4px; color: #f5f4e9; font-family: ui-monospace, monospace; font-size: 21px; font-variant-numeric: tabular-nums; }
 .progress #correct-count { color: var(--accent); }
@@ -84,12 +85,17 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 #map .leaflet-control-zoom a:hover { background: #2b3d47; }
 #app .leaflet-control-attribution { background: #111e29c9; color: var(--muted); font-size: 9px; }
 #app .leaflet-control-attribution a { color: #c8d5d9; }
-#geography-policy { width: min(540px, calc(100vw - 36px)); max-height: calc(100dvh - 48px); padding: 26px; border: 1px solid #526574; border-radius: 18px; background: #14242e; color: #f5f4e9; }
-#geography-policy::backdrop { background: #070f17bb; }
-#close-policy { float: right; margin: 0 0 14px 15px; }
-#geography-policy h2 { font-size: 23px; font-weight: 500; line-height: 1.25; }
-#geography-policy p { color: #c0cdd2; font-size: 13px; line-height: 1.7; }
-#geography-policy a { color: var(--accent); }
+.app-dialog { width: min(540px, calc(100vw - 36px)); max-height: calc(100dvh - 48px); padding: 26px; border: 1px solid #526574; border-radius: 18px; background: #14242e; color: #f5f4e9; }
+.app-dialog::backdrop { background: #070f17bb; }
+.dialog-close { float: right; margin: 0 0 14px 15px; }
+.app-dialog h2 { font-size: 23px; font-weight: 500; line-height: 1.25; }
+.app-dialog p { color: #c0cdd2; font-size: 13px; line-height: 1.7; }
+.app-dialog a { color: var(--accent); }
+.profile-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 20px; }
+.profile-actions .primary { width: auto; flex: 1; justify-content: center; }
+.danger { color: #f5c7bc; border-color: #bd7867; background: #3b2827; }
+.danger:hover:not(:disabled) { color: #fff0eb; border-color: #e9a591; background: #573330; }
+#profile-reset-error { padding: 12px; border-left: 2px solid #e9a591; color: #f5c7bc; }
 @media (max-width: 700px) {
   .map-shade { background: linear-gradient(180deg, #0b1521b3, transparent 24%, transparent 56%, #0b15214d); }
   .app-header { top: calc(18px + env(safe-area-inset-top, 0px)); left: 18px; right: 18px; justify-content: space-between; gap: 12px; }
@@ -99,6 +105,7 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
   .map-actions { gap: 8px; }
   .secondary { min-height: 40px; padding: 0 10px; font-size: 11px; }
   .info-button { width: 32px; font-size: 17px; }
+  .profile-button { width: 32px; padding: 0; }
   .progress { top: calc(78px + env(safe-area-inset-top, 0px)); left: 23px; right: auto; font-size: 10px; }
   .progress > span:not(.progress-divider) { font-size: 14px; }
   .progress-divider { margin: 0 10px; }
@@ -119,6 +126,9 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
   .fact-card h2 { font-size: 22px; }
   .map-caption { display: none; }
   #map .leaflet-top { top: calc(108px + env(safe-area-inset-top, 0px)); }
+}
+@media (max-width: 420px) {
+  .world-view-label { display: none; }
 }
 
 /* Linked-map assistance keeps regional context visible while a country is enlarged. */

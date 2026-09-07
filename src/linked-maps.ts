@@ -1,6 +1,6 @@
 import L from 'leaflet';
 import type { Polygon } from 'geojson';
-import { countries, type Country } from './geography';
+import { countries, polygonArea, type Country } from './geography';
 
 type Answer = { longitude: number; latitude: number; correct: boolean };
 type LandMass = { country: Country; geometry: Polygon; bounds: L.LatLngBounds; area: number; anchor?: L.LatLng };
@@ -8,7 +8,6 @@ type Frame = { primary: LandMass; region: L.LatLngBounds; detail: L.LatLngBounds
 type Copies = Map<LandMass, { shift: number; layer: L.GeoJSON }>;
 const boundaryStyle: L.PathOptions = { color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1, interactive: false };
 const targetStyle: L.PathOptions = { color: '#e3f5b1', weight: 2, fillColor: '#a2c472', fillOpacity: 0.85, interactive: false, className: 'linked-target' };
-const radians = Math.PI / 180;
 const frames = new Map<string, Frame>();
 let landMasses: LandMass[] | undefined;
 
@@ -19,18 +18,12 @@ function geography(): LandMass[] {
     const polygons = country.geometry.type === 'Polygon' ? [country.geometry.coordinates] : country.geometry.coordinates;
     return polygons.map(coordinates => {
       const bounds = L.latLngBounds([]);
-      let area = 0;
-      for (let ringIndex = 0; ringIndex < coordinates.length; ringIndex++) {
-        const ring = coordinates[ringIndex];
-        let ringArea = 0;
-        for (let i = 1; i < ring.length; i++) {
-          const [x, y] = ring[i];
-          const [previousX, previousY] = ring[i - 1];
-          if (ringIndex === 0) bounds.extend([y, x]);
-          ringArea += (x - previousX) * radians * (Math.sin(y * radians) + Math.sin(previousY * radians));
-        }
-        area += Math.abs(ringArea) * (ringIndex === 0 ? 1 : -1);
+      const exterior = coordinates[0];
+      for (let i = 1; i < exterior.length; i++) {
+        const [x, y] = exterior[i];
+        bounds.extend([y, x]);
       }
+      const area = polygonArea(coordinates);
       return { country, geometry: { type: 'Polygon' as const, coordinates }, bounds, area };
     });
   });
