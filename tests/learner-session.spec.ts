@@ -6,7 +6,7 @@ import { join } from 'node:path';
 test('a guest starts a country name-to-location session without an account', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
-  await expect(page.getByRole('heading', { name: 'Find Afghanistan' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Afghanistan/ })).toBeVisible();
   await expect(page.getByRole('region', { name: 'World map' })).toBeVisible();
 });
 
@@ -20,17 +20,26 @@ async function selectWorldPoint(page: Page, longitude: number, latitude: number)
   await page.mouse.click(box.x + x, box.y + y);
 }
 
-test('a guest gets correctness feedback and continues without counting an answer twice', async ({ page }) => {
+async function answerWorldPoint(page: Page, longitude: number, latitude: number) {
+  await selectWorldPoint(page, longitude, latitude);
+  await page.getByRole('button', { name: 'Check location' }).click();
+}
+
+test('a guest can revise a pin before checking and cannot count an answer twice', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
+  await selectWorldPoint(page, 0, 0);
+  await expect(page.getByText('0 answered · 0 correct', { exact: true })).toBeVisible();
   await selectWorldPoint(page, 67, 34);
+  await expect(page.getByText('0 answered · 0 correct', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Check location' }).click();
   await expect(page.getByRole('status')).toContainText('Correct');
   await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();
   await selectWorldPoint(page, 0, 0);
   await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Next learning item' }).click();
-  await expect(page.getByRole('heading', { name: 'Find Åland' })).toBeVisible();
-  await selectWorldPoint(page, 25, 62); // Finland, not Åland.
+  await expect(page.getByRole('heading', { name: /Åland/ })).toBeVisible();
+  await answerWorldPoint(page, 25, 62); // Finland, not Åland.
   await expect(page.getByRole('status')).toContainText('Not quite');
   await expect(page.getByRole('status')).toContainText('Finland');
   await expect(page.getByText('2 answered · 1 correct', { exact: true })).toBeVisible();
@@ -43,7 +52,7 @@ test('guest answers and the next learning item survive a browser restart', async
     let page = await context.newPage();
     await page.goto('http://127.0.0.1:5173');
     await page.getByRole('button', { name: 'Start country session' }).click();
-    await selectWorldPoint(page, 67, 34);
+    await answerWorldPoint(page, 67, 34);
     await expect(page.getByRole('status')).toContainText('Correct');
     await context.close();
     context = await chromium.launchPersistentContext(profile, { viewport: { width: 1280, height: 900 } });
@@ -52,14 +61,14 @@ test('guest answers and the next learning item survive a browser restart', async
     await expect(page.getByRole('status')).toContainText('Correct');
     await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Next learning item' }).click();
-    await expect(page.getByRole('heading', { name: 'Find Åland' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Åland/ })).toBeVisible();
     await context.close();
     context = await chromium.launchPersistentContext(profile, { viewport: { width: 1280, height: 900 } });
     page = await context.newPage();
     await page.goto('http://127.0.0.1:5173');
-    await expect(page.getByRole('heading', { name: 'Find Åland' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Åland/ })).toBeVisible();
     await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();
-    await selectWorldPoint(page, 25, 62);
+    await answerWorldPoint(page, 25, 62);
     await expect(page.getByRole('status')).toContainText('Not quite');
     await expect(page.getByText('2 answered · 1 correct', { exact: true })).toBeVisible();
   } finally {
@@ -72,30 +81,30 @@ test.describe('geographic tolerance', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/');
     await page.getByRole('button', { name: 'Start country session' }).click();
-    await selectWorldPoint(page, 67, 34);
+    await answerWorldPoint(page, 67, 34);
     await page.getByRole('button', { name: 'Next learning item' }).click();
-    await selectWorldPoint(page, 25, 62);
+    await answerWorldPoint(page, 25, 62);
     await page.getByRole('button', { name: 'Next learning item' }).click();
-    await expect(page.getByRole('heading', { name: 'Find Albania' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Albania/ })).toBeVisible();
   });
 
   test('accepts a point just offshore rather than requiring a polygon hit', async ({ page }) => {
     // At this world-view resolution this selects 19.336° E, 41.509° N,
     // in the Adriatic, just west of Albania's coast.
-    await selectWorldPoint(page, 19.5, 41.3);
+    await answerWorldPoint(page, 19.5, 41.3);
     await expect(page.getByRole('status')).toContainText('Correct');
     await expect(page.getByText('3 answered · 2 correct', { exact: true })).toBeVisible();
   });
 
   test('rejects a neighboring country even close to the target border', async ({ page }) => {
-    await selectWorldPoint(page, 19.36, 42.37); // Montenegro, near the Albanian border.
+    await answerWorldPoint(page, 19.36, 42.37); // Montenegro, near the Albanian border.
     await expect(page.getByRole('status')).toContainText('Not quite');
     await expect(page.getByRole('status')).toContainText('Montenegro');
     await expect(page.getByText('3 answered · 1 correct', { exact: true })).toBeVisible();
   });
 
   test('rejects an ocean selection beyond the geographic tolerance', async ({ page }) => {
-    await selectWorldPoint(page, 0, 0);
+    await answerWorldPoint(page, 0, 0);
     await expect(page.getByRole('status')).toContainText('Not quite');
     await expect(page.getByText('3 answered · 1 correct', { exact: true })).toBeVisible();
   });
@@ -108,9 +117,9 @@ test('warns when progress cannot be saved while allowing guest practice', async 
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
   await expect(page.getByRole('alert')).toContainText('Progress is not saved');
-  await selectWorldPoint(page, 67, 34);
+  await answerWorldPoint(page, 67, 34);
   await expect(page.getByRole('status')).toContainText('Correct');
   await page.getByRole('button', { name: 'Next learning item' }).click();
-  await expect(page.getByRole('heading', { name: 'Find Åland' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Åland/ })).toBeVisible();
   await expect(page.getByRole('alert')).toContainText('Progress is not saved');
 });
