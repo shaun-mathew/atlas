@@ -4,7 +4,7 @@
 .variant-C .map-shade { display: none; }
 .island-prototype .leaflet-control-zoom { border: 1px solid #ffffff30; border-radius: 9px; overflow: hidden; }
 .island-prototype .leaflet-control-zoom a { background: #172b36; color: #e4eddf; border-color: #ffffff20; }
-.island-prototype .leaflet-control-scale-line { color: #c5d1d6; border-color: #81959d; background: #111e29b0; font-size: 10px; }
+.island-prototype .leaflet-control-scale-line { color: #c5d1d6; border-color: #81959d; background: #111e29b0; font-size: 10px; text-shadow: none; }
 .island-prototype #map .leaflet-bottom { bottom: 115px; }
 .prototype-badge { border: 1px solid #e7c18b60; background: #e7c18b10; color: #e7c18b; border-radius: 6px; padding: 8px 10px; font: 10px/1.4 ui-monospace, monospace; }
 .prototype-example { position: absolute; z-index: 700; right: 28px; top: 28px; display: flex; align-items: center; gap: 12px; }
