@@ -4,7 +4,7 @@ body { margin: 0; }
 [hidden] { display: none !important; }
 button { font: inherit; cursor: pointer; }
 button, a { -webkit-tap-highlight-color: transparent; }
-button:focus-visible, a:focus-visible { outline: 3px solid #f7f8e9; outline-offset: 4px; }
+button:focus-visible, a:focus-visible, summary:focus-visible, .fact-card:focus-visible { outline: 3px solid #f7f8e9; outline-offset: 4px; }
 #app { position: relative; isolation: isolate; width: 100%; height: 100dvh; min-height: 480px; overflow: hidden; }
 #map { position: absolute; inset: 0; z-index: 0; background: #111e29; cursor: crosshair; }
 .map-grid { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
@@ -43,6 +43,29 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 .country-flag { display: block; width: 64px; height: 48px; margin-bottom: 12px; object-fit: contain; object-position: left center; }
 .feedback strong { display: block; margin: 2px 0 7px; font-size: 14px; font-weight: 600; }
 .feedback span { display: block; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.session-panel.is-answered { display: flex; flex-direction: column; overflow: hidden; }
+.is-answered #session { display: flex; flex-direction: column; min-height: 0; }
+.is-answered #session > .prompt, .is-answered #session > h1, .is-answered #session > .instructions { display: none; }
+.is-answered .eyebrow, .is-answered .feedback, .is-answered .primary, .is-answered #storage-notice { flex-shrink: 0; }
+.is-answered .answer-dock { display: flex; flex-direction: column; min-height: 0; margin-top: 12px; }
+.is-answered .feedback { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; margin-bottom: 12px; }
+.is-answered .feedback strong, .is-answered .feedback span { grid-column: 2; }
+.is-answered .country-flag { grid-column: 1; grid-row: 1 / 3; width: 36px; height: 27px; margin: 2px 0 0; }
+.fact-card { min-height: 0; margin: 0 0 14px; padding: 16px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #536570 transparent; border: 1px solid #637b8b; border-radius: 10px; background: #1c303f; color: #e5ecef; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.fact-card:focus-visible { outline-offset: -4px; }
+.fact-card h2 { margin: 0; font-size: 24px; font-weight: 550; line-height: 1.2; letter-spacing: -0.5px; }
+.fact-notice { margin: 8px 0 16px; color: #c0d3df; font-size: 11px; }
+.fact-card dl { margin: 0; }
+.fact-card dt { margin-top: 12px; color: #c0d3df; font-size: 10px; font-weight: 650; letter-spacing: 0.5px; text-transform: uppercase; }
+.fact-card dd { margin: 3px 0 0; }
+.fact-card details { margin-top: 18px; padding-top: 12px; border-top: 1px solid #637b8b80; }
+.fact-card summary { min-height: 32px; padding: 4px 0; cursor: pointer; font-weight: 600; }
+.fact-card details p { margin: 8px 0; }
+.fact-card ul { margin: 8px 0 0; padding-left: 16px; }
+.fact-card li + li { margin-top: 12px; }
+.fact-card a { color: #d2e5f5; text-underline-offset: 3px; }
+.fact-card li span { display: block; margin-top: 4px; color: #b9cbd7; font-size: 10px; }
+.fact-version { margin: 16px 0 0; color: #b9cbd7; font-size: 10px; }
 .local-note { margin: 12px 0 0; color: var(--muted); font-size: 10px; text-align: center; }
 #storage-notice { margin: 12px 0 0; padding: 13px; color: #f1cdac; background: #2e2b2af5; border: 1px solid #c88d6550; border-radius: 9px; font-size: 11px; line-height: 1.6; }
 .map-caption { position: absolute; bottom: calc(42px + env(safe-area-inset-bottom, 0px)); right: 35px; z-index: 2; color: #b0bdc8; font: 10px ui-monospace, monospace; letter-spacing: 1px; text-transform: uppercase; pointer-events: none; }
@@ -81,6 +104,10 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
   .primary { min-height: 49px; }
   .feedback strong { font-size: 12px; }
   .feedback span { font-size: 10px; line-height: 1.55; }
+  .is-answered .answer-dock { overflow: hidden; }
+  .is-answered .feedback { margin-bottom: 10px; }
+  .fact-card { margin-bottom: 10px; padding: 13px; }
+  .fact-card h2 { font-size: 22px; }
   .map-caption { display: none; }
   #map .leaflet-top { top: calc(108px + env(safe-area-inset-top, 0px)); }
 }

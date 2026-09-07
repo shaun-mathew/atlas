@@ -25,6 +25,71 @@ async function answerWorldPoint(page: Page, longitude: number, latitude: number)
   await page.getByRole('button', { name: 'Check location' }).click();
 }
 
+test('an answered country reveals sourced facts without assessing population', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  const card = page.getByRole('region', { name: 'Country fact card' });
+  await expect(card).toBeHidden();
+  await answerWorldPoint(page, 67, 34);
+  await expect(card.getByRole('heading', { name: 'Afghanistan', exact: true })).toBeVisible();
+  await expect(card).toContainText('Dari');
+  await expect(card).toContainText('Pashto');
+  await expect(card).toContainText('49,474,805 (reference year 2025)');
+  await expect(card).toContainText(/Population direction\s*increasing.*2025/);
+  await expect(card).toContainText('Informational · not scored');
+  await card.getByText('Sources and fact version', { exact: true }).click();
+  await expect(card.getByRole('link').first()).toHaveAttribute('href', /^https:\/\//);
+  await expect(card).toContainText('Retrieved 2026-09-07');
+  await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(card).toBeHidden();
+});
+
+test('an incorrect territory answer teaches the target facts and restores them on reload', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  await answerWorldPoint(page, 67, 34);
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await answerWorldPoint(page, 25, 62); // Finland, not Åland.
+  const card = page.getByRole('region', { name: 'Country fact card' });
+  await expect(page.getByRole('status')).toContainText('Not quite');
+  await expect(card.getByRole('heading', { name: 'Åland', exact: true })).toBeVisible();
+  await expect(card).toContainText(/Autonomous region of Finland/);
+  await expect(card).toContainText('Swedish');
+  await expect(card).toContainText('30,836 (reference year 2025)');
+  await expect(card).toContainText(/Population direction\s*increasing.*2024–2025/);
+  const presentedFacts = await card.textContent();
+  await page.reload();
+  await expect(card).toHaveText(presentedFacts!);
+  await expect(page.getByText('2 answered · 1 correct', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(card).toBeHidden();
+  await expect(page.getByRole('heading', { name: /Albania/ })).toBeVisible();
+});
+
+test('a guest save from before fact cards retains its answer and gains dated facts', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('atlas-practice.guest', JSON.stringify({
+      version: 1, started: true, cursor: 0,
+      attempts: [{
+        countryId: 'AFG', skill: 'name-to-location',
+        boundaryVersion: 'natural-earth-5.1.2-50m',
+        longitude: 67, latitude: 34, correct: true,
+        selectedCountry: 'Afghanistan', answeredAt: '2026-09-06T12:00:00.000Z',
+      }],
+    }));
+  });
+  await page.goto('/');
+  await expect(page.getByRole('status')).toContainText('Correct');
+  const card = page.getByRole('region', { name: 'Country fact card' });
+  await expect(card.getByRole('heading', { name: 'Afghanistan', exact: true })).toBeVisible();
+  await expect(card).toContainText('49,474,805 (reference year 2025)');
+  await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(page.getByRole('heading', { name: /Åland/ })).toBeVisible();
+  await expect(card).toBeHidden();
+});
+
 test('a guest can revise a pin before checking and cannot count an answer twice', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
