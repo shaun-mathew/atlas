@@ -123,6 +123,12 @@ app.innerHTML = `
     <p id="profile-reset-error" role="alert" hidden></p>
   </dialog>`;
 
+// Throwaway facet designs on the existing route; never mount in production.
+if (import.meta.env.DEV && new URLSearchParams(location.search).has('variant')) {
+  const { mountFacetPrototype } = await import('./facet-mode.prototype');
+  mountFacetPrototype(app);
+} else {
+
 const session = new GuestSession();
 const panel = document.querySelector<HTMLDivElement>('.session-panel')!;
 const header = document.querySelector<HTMLElement>('.app-header')!;
@@ -493,3 +499,4 @@ document.querySelector('#confirm-reset')!.addEventListener('click', () => {
   document.querySelector<HTMLButtonElement>('#start')!.focus();
 });
 renderQuestion();
+}
