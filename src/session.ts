@@ -15,6 +15,7 @@ const attemptSchema = z.object({
   longitude: z.number().min(-180).max(180),
   latitude: z.number().min(-85).max(85),
   correct: z.boolean(),
+  assisted: z.boolean().default(false),
   selectedCountry: z.string().nullable(),
   answeredAt: z.iso.datetime(),
 });
@@ -31,6 +32,7 @@ const legacyProgressSchema = z.object({
 const questionSchema = z.object({
   countryId: countryIdSchema,
   kind: z.enum(['new', 'review', 'retry']),
+  assisted: z.boolean().default(false),
 });
 const progressSchema = z.object({
   version: z.literal(2),
@@ -59,7 +61,7 @@ const day = 24 * 60 * 60 * 1000;
 export class GuestSession {
   private state: z.infer<typeof progressSchema> = {
     version: 2, started: false, cursor: 0, attempts: [],
-    current: { countryId: countries[0].properties.id, kind: 'new' },
+    current: { countryId: countries[0].properties.id, kind: 'new', assisted: false },
   };
   private learningItems = new Map<string, Proficiency>();
   storageNotice = '';
@@ -73,7 +75,11 @@ export class GuestSession {
         const legacy = legacyProgressSchema.parse(parsed);
         this.state = {
           ...legacy, version: 2,
-          current: { countryId: countries[legacy.cursor % countries.length].properties.id, kind: 'new' },
+          current: {
+            countryId: countries[legacy.cursor % countries.length].properties.id,
+            kind: 'new',
+            assisted: legacy.attempts[legacy.cursor]?.assisted ?? false,
+          },
           attempts: legacy.attempts.map(attempt => ({ ...attempt, kind: 'new' as const })),
         };
       } else {
@@ -89,6 +95,7 @@ export class GuestSession {
   get cursor() { return this.state.cursor; }
   get attempts() { return this.state.attempts; }
   get questionKind() { return this.state.current?.kind; }
+  get assisted() { return this.state.current?.assisted ?? false; }
   get country() { return this.state.current ? countriesById.get(this.state.current.countryId)! : null; }
   get feedback() { return this.attempts[this.cursor]; }
   get proficiency() { return this.state.current ? this.learningItems.get(`${this.state.current.countryId}:name-to-location`) : undefined; }
@@ -102,6 +109,12 @@ export class GuestSession {
 
   start() {
     this.state.started = true;
+    this.save();
+  }
+
+  requestLocationHelp() {
+    if (!this.started || !this.state.current || this.feedback || this.assisted) return;
+    this.state.current.assisted = true;
     this.save();
   }
 
@@ -119,15 +132,16 @@ export class GuestSession {
     if (attempt.kind === 'retry') return;
     const key = `${attempt.countryId}:${attempt.skill}`;
     const previous = this.learningItems.get(key);
-    const intervalDays = attempt.correct
+    const unassistedSuccess = attempt.correct && !attempt.assisted;
+    const intervalDays = unassistedSuccess
       ? attempt.kind === 'review'
         ? reviewIntervals.find(interval => interval > (previous?.intervalDays ?? 0)) ?? 30
         : 1
       : 0;
     this.learningItems.set(key, {
-      level: !attempt.correct ? 'Learning' : intervalDays > 1 ? 'Retained' : 'Familiar',
+      level: !unassistedSuccess ? 'Learning' : intervalDays > 1 ? 'Retained' : 'Familiar',
       intervalDays,
-      dueAt: new Date(Date.parse(attempt.answeredAt) + (attempt.correct ? intervalDays * day : 10 * 60 * 1000)).toISOString(),
+      dueAt: new Date(Date.parse(attempt.answeredAt) + (unassistedSuccess ? intervalDays * day : 10 * 60 * 1000)).toISOString(),
     });
   }
 
@@ -143,6 +157,7 @@ export class GuestSession {
       countryId: country.properties.id,
       skill: 'name-to-location',
       kind: this.state.current!.kind,
+      assisted: this.assisted,
       boundaryVersion: 'natural-earth-5.1.2-50m',
       factVersion,
       longitude, latitude, correct,
@@ -156,7 +171,7 @@ export class GuestSession {
 
   retry() {
     if (!this.feedback || this.feedback.correct) return;
-    this.state.current = { countryId: this.feedback.countryId, kind: 'retry' };
+    this.state.current = { countryId: this.feedback.countryId, kind: 'retry', assisted: this.feedback.assisted };
     this.state.cursor = this.attempts.length;
     this.save();
   }
@@ -173,8 +188,8 @@ export class GuestSession {
       else if (item.dueAt <= now && (!due || item.dueAt < due.dueAt)) due = { countryId, dueAt: item.dueAt };
     }
     this.state.cursor = this.attempts.length;
-    this.state.current = due ? { countryId: due.countryId, kind: 'review' }
-      : unseen ? { countryId: unseen, kind: 'new' } : null;
+    this.state.current = due ? { countryId: due.countryId, kind: 'review', assisted: false }
+      : unseen ? { countryId: unseen, kind: 'new', assisted: false } : null;
     this.save();
   }
 }

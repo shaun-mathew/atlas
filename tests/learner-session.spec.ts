@@ -232,6 +232,13 @@ test('name-to-location success schedules a later review and retained success ext
   await answerWorldPoint(page, 67, 34);
   await expect(proficiency).toContainText('Retained');
   await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-11T12:00:00.000Z');
+  // Exploring a revealed answer must not downgrade earned retention.
+  await page.getByRole('button', { name: 'Explore linked maps' }).click();
+  await expect(page.getByRole('region', { name: 'Country close-up' })).toBeVisible();
+  await expect(page.getByText(/Location help used/)).toBeHidden();
+  await page.reload();
+  await expect(proficiency).toContainText('Retained');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-11T12:00:00.000Z');
 });
 
 test('immediate retry does not defer a missed item or count as retained knowledge', async ({ page }) => {
@@ -294,4 +301,105 @@ test('a guest with every country scheduled waits rather than reviewing early', a
   await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
   await answerWorldPoint(page, 67, 34);
   await expect(page.getByRole('region', { name: 'Name-to-location proficiency' })).toContainText('Retained');
+});
+
+test('linked-map help survives reload and schedules an unassisted check instead of retention credit', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  await answerWorldPoint(page, 67, 34);
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await page.getByRole('button', { name: 'Show linked maps' }).click();
+  const overview = page.getByRole('region', { name: 'Regional overview' });
+  const detail = page.getByRole('region', { name: 'Country close-up' });
+  await expect(overview).toBeVisible();
+  await expect(detail).toBeVisible();
+  await overview.click();
+  await expect(page.getByRole('button', { name: 'Check location' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Back to the country' }).click();
+  await expect(page.getByText(/Location help used/)).toBeVisible();
+  await page.getByRole('button', { name: 'Use world map' }).click();
+  await expect(detail).toBeHidden();
+  await expect(page.getByText(/Location help used/)).toBeVisible();
+  await page.reload();
+  await expect(detail).toBeVisible();
+  await expect(page.getByText(/Location help used/)).toBeVisible();
+  await detail.click();
+  await page.getByRole('button', { name: 'Check location' }).click();
+  await expect(page.getByRole('status')).toContainText('Correct');
+  const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
+  await expect(proficiency).toContainText('Learning');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-07T12:10:00.000Z');
+  await expect(page.getByRole('region', { name: 'Country fact card' })).toContainText('Åland');
+  await expect(page.getByLabel('Practice results')).toContainText('2 answered · 1 correct · 1 guided');
+  await page.reload();
+  await expect(page.getByRole('status')).toContainText('Correct');
+  await expect(proficiency).toContainText('Learning');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-07T12:10:00.000Z');
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(detail).toBeHidden();
+  await expect(page.getByRole('heading', { name: /Albania/ })).toBeVisible();
+  await answerWorldPoint(page, 19.5, 41.3);
+  await page.clock.setFixedTime(new Date('2026-09-07T12:10:00Z'));
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(page.getByRole('heading', { name: /Åland/ })).toBeVisible();
+  await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
+  await expect(detail).toBeHidden();
+  await expect(page.getByText(/Location help used/)).toBeHidden();
+});
+
+test('help on a scheduled review replaces familiarity with an unassisted check', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
+  // An existing v2 save has neither question nor attempt assistance flags.
+  await page.addInitScript(() => {
+    if (localStorage.getItem('atlas-practice.guest') !== null) return;
+    localStorage.setItem('atlas-practice.guest', JSON.stringify({
+      version: 2, started: true, cursor: 1,
+      current: { countryId: 'AFG', kind: 'review' },
+      attempts: [{
+        countryId: 'AFG', skill: 'name-to-location', kind: 'new',
+        boundaryVersion: 'natural-earth-5.1.2-50m',
+        longitude: 67, latitude: 34, correct: true,
+        selectedCountry: 'Afghanistan', answeredAt: '2026-09-07T12:00:00.000Z',
+      }],
+    }));
+  });
+  await page.goto('/');
+  const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
+  await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
+  await expect(proficiency).toContainText('Familiar');
+  await page.getByRole('button', { name: 'Show linked maps' }).click();
+  await page.getByRole('button', { name: 'Use world map' }).click();
+  await answerWorldPoint(page, 67, 34);
+  await expect(page.getByRole('status')).toContainText('Correct');
+  await expect(proficiency).toContainText('Learning');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-08T12:10:00.000Z');
+  await page.reload();
+  await expect(proficiency).toContainText('Learning');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-08T12:10:00.000Z');
+});
+
+test('retrying a guided mistake preserves assistance without delaying the unassisted check', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  await page.getByRole('button', { name: 'Show linked maps' }).click();
+  await page.getByRole('button', { name: 'Use world map' }).click();
+  await answerWorldPoint(page, 0, 0);
+  await expect(page.getByRole('status')).toContainText('Not quite');
+  const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
+  await expect(proficiency).toContainText('Learning');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-07T12:10:00.000Z');
+  await page.clock.setFixedTime(new Date('2026-09-07T12:09:59Z'));
+  await page.getByRole('button', { name: 'Retry now' }).click();
+  await expect(page.getByText(/Location help used/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Country close-up' })).toBeVisible();
+  await page.getByRole('button', { name: 'Use world map' }).click();
+  await answerWorldPoint(page, 67, 34);
+  await expect(page.getByRole('status')).toContainText('Correct');
+  await page.reload();
+  await expect(page.getByText(/Location help used/)).toBeVisible();
+  await expect(proficiency).toContainText('Learning');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-07T12:10:00.000Z');
 });
