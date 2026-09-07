@@ -100,11 +100,44 @@ function render() {
     zoomControl: false, maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 0.8,
   }).setView(viewCenter ?? [12, 0], viewZoom ?? (canvas.clientWidth < 650 ? 1 : 2));
   L.control.zoom({ position: 'topright' }).addTo(map);
-  for (let longitude = -180; longitude <= 180; longitude += 30) {
-    L.polyline([[-85, longitude], [85, longitude]], { color: palette.grid, opacity: dark ? 0.12 : 0.24, weight: 1, interactive: false }).addTo(map);
-  }
-  for (let latitude = -60; latitude <= 60; latitude += 30) {
-    L.polyline([[latitude, -180], [latitude, 180]], { color: palette.grid, opacity: dark ? 0.12 : 0.24, weight: 1, interactive: false }).addTo(map);
+  if (dark) {
+    // B is an edge-to-edge canvas, so extend its geographic grid to the viewport
+    // rather than clipping the lines at ±180° longitude and the Mercator poles.
+    const gridMap = map;
+    const grid = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    grid.classList.add('mf-viewport-grid');
+    grid.setAttribute('aria-hidden', 'true');
+    Object.assign(grid.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', pointerEvents: 'none', zIndex: '0' });
+    const lines = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    lines.setAttribute('stroke', palette.grid);
+    lines.setAttribute('stroke-width', '1');
+    lines.setAttribute('opacity', '0.12');
+    grid.append(lines);
+    canvas.append(grid);
+    function drawViewportGrid() {
+      const size = gridMap.getSize();
+      const bounds = gridMap.getBounds();
+      const segments: string[] = [];
+      for (let longitude = Math.floor(bounds.getWest() / 30) * 30; longitude <= bounds.getEast(); longitude += 30) {
+        const x = gridMap.latLngToContainerPoint([0, longitude]).x;
+        segments.push(`M${x} 0V${size.y}`);
+      }
+      for (let latitude = -60; latitude <= 60; latitude += 30) {
+        const y = gridMap.latLngToContainerPoint([latitude, 0]).y;
+        if (y >= 0 && y <= size.y) segments.push(`M0 ${y}H${size.x}`);
+      }
+      grid.setAttribute('viewBox', `0 0 ${size.x} ${size.y}`);
+      lines.setAttribute('d', segments.join(''));
+    }
+    gridMap.on('move zoom resize', drawViewportGrid);
+    drawViewportGrid();
+  } else {
+    for (let longitude = -180; longitude <= 180; longitude += 30) {
+      L.polyline([[-85, longitude], [85, longitude]], { color: palette.grid, opacity: 0.24, weight: 1, interactive: false }).addTo(map);
+    }
+    for (let latitude = -60; latitude <= 60; latitude += 30) {
+      L.polyline([[latitude, -180], [latitude, 180]], { color: palette.grid, opacity: 0.24, weight: 1, interactive: false }).addTo(map);
+    }
   }
   const boundaries = L.geoJSON(countries, {
     style: { color: palette.border, weight: 0.8, fillColor: palette.land, fillOpacity: 1 },
