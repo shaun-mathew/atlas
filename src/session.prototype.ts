@@ -101,8 +101,8 @@ function render() {
   }).setView(viewCenter ?? [12, 0], viewZoom ?? (canvas.clientWidth < 650 ? 1 : 2));
   L.control.zoom({ position: 'topright' }).addTo(map);
   if (dark) {
-    // B is an edge-to-edge canvas, so extend its geographic grid to the viewport
-    // rather than clipping the lines at ±180° longitude and the Mercator poles.
+    // B uses a projected square grid anchored to the map, filling the viewport
+    // in both directions even beyond the world's geographic bounds.
     const gridMap = map;
     const grid = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     grid.classList.add('mf-viewport-grid');
@@ -111,7 +111,7 @@ function render() {
     const lines = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     lines.setAttribute('stroke', palette.grid);
     lines.setAttribute('stroke-width', '1');
-    lines.setAttribute('opacity', '0.12');
+    lines.setAttribute('opacity', '0.22');
     grid.append(lines);
     canvas.append(grid);
     function drawViewportGrid() {
@@ -122,9 +122,11 @@ function render() {
         const x = gridMap.latLngToContainerPoint([0, longitude]).x;
         segments.push(`M${x} 0V${size.y}`);
       }
-      for (let latitude = -60; latitude <= 60; latitude += 30) {
-        const y = gridMap.latLngToContainerPoint([latitude, 0]).y;
-        if (y >= 0 && y <= size.y) segments.push(`M0 ${y}H${size.x}`);
+      const spacing = L.CRS.EPSG3857.scale(gridMap.getZoom()) / 12;
+      const equator = gridMap.latLngToContainerPoint([0, 0]).y;
+      const firstRow = ((equator % spacing) + spacing) % spacing;
+      for (let y = firstRow; y <= size.y; y += spacing) {
+        segments.push(`M0 ${Math.round(y)}H${size.x}`);
       }
       grid.setAttribute('viewBox', `0 0 ${size.x} ${size.y}`);
       lines.setAttribute('d', segments.join(''));
