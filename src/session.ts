@@ -13,7 +13,7 @@ const attemptSchema = z.object({
   // Answers saved before fact cards use the first published fact release.
   factVersion: z.literal(factVersion).default('2026-09-07'),
   longitude: z.number().min(-180).max(180),
-  latitude: z.number().min(-85).max(85),
+  latitude: z.number().min(-90).max(90),
   correct: z.boolean(),
   assisted: z.boolean().default(false),
   selectedCountry: z.string().nullable(),
@@ -199,7 +199,7 @@ export class GuestSession {
   answer(longitude: number, latitude: number) {
     const country = this.country;
     if (!this.started || !country || this.feedback || !Number.isFinite(longitude) || !Number.isFinite(latitude)
-      || Math.abs(longitude) > 180 || Math.abs(latitude) > 85) return;
+      || Math.abs(longitude) > 180 || Math.abs(latitude) > 90) return;
     const point = [longitude, latitude];
     const inside = booleanPointInPolygon(point, country);
     const selected = inside ? country : countries.find(candidate => booleanPointInPolygon(point, candidate));

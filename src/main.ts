@@ -406,7 +406,7 @@ function renderQuestion() {
 }
 
 function selectPoint(point: L.LatLng) {
-  if (!session.started || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 85) return;
+  if (!session.started || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
   pendingPoint = point;
   globe?.setSelection({ longitude: point.lng, latitude: point.lat });
   if (!linkedOpen && !globeOpen) {

@@ -176,3 +176,20 @@ test('switching away from location help cannot earn unassisted globe credit', as
   await page.reload();
   await expect(page.getByRole('status')).toContainText('Correct — guided practice');
 });
+
+test('a polar globe selection is evaluated and survives a reload', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Start country session' }).click();
+  await page.getByRole('button', { name: '3D globe', exact: true }).click();
+  const globe = page.getByRole('application', { name: 'Interactive globe' });
+  await clickGlobePoint(page, -52, -12);
+  for (let turn = 0; turn < 4; turn++) await globe.press('ArrowUp');
+  await clickGlobePoint(page, 0, 89, { longitude: 0, latitude: 75, distance: 3 });
+  await expect(page.getByRole('button', { name: 'Check location' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Check location' }).click();
+  await expect(page.getByRole('status')).toContainText('Not quite');
+  await page.reload();
+  await expect(page.getByText('1 answered · 0 correct', { exact: true })).toBeVisible();
+  await expect(page.getByRole('status')).toContainText('Not quite');
+  await expect(page.getByRole('region', { name: 'Name-to-location proficiency' })).toContainText('Learning');
+});
