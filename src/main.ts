@@ -34,7 +34,6 @@ app.innerHTML = `
       <p class="instructions">Start with larger, recognizable countries and work toward smaller places. Keep practicing for as long as you like. No account needed.</p>
       <div class="answer-dock">
         <button id="start" class="primary" type="button">Start country session <span aria-hidden="true">→</span></button>
-        <button id="start-diagnostic" class="secondary" type="button">Start diagnostic</button>
         <p class="local-note">Your progress stays in this browser.</p>
       </div>
     </section>
@@ -66,12 +65,6 @@ app.innerHTML = `
         <button id="retry" class="secondary" type="button" hidden>Retry now</button>
       </div>
     </section>
-    <section id="diagnostic-complete" hidden>
-      <p class="eyebrow">Diagnostic complete</p>
-      <h1>Diagnostic complete<span class="accent">.</span></h1>
-      <p class="instructions">Your answers set the starting point for continuous adaptive practice: due reviews, new countries, and practice revisits mixed together. Stop whenever you like; your progress is saved.</p>
-      <div class="answer-dock"><button id="start-adaptive" class="primary" type="button">Continue adaptive practice <span aria-hidden="true">→</span></button></div>
-    </section>
     <p id="storage-notice" role="alert" hidden></p>
   </div>
   <dialog id="geography-policy" class="app-dialog" aria-labelledby="policy-title">
@@ -80,14 +73,14 @@ app.innerHTML = `
     <p>Points inside the target boundary or within 25 km are accepted, unless they fall inside another mapped country or territory.</p>
     <p>241 countries and territories, excluding Antarctica. Public-domain <a href="https://www.naturalearthdata.com/about/terms-of-use/">Natural Earth</a> 5.1.2, 1:50m Admin-0 boundaries, retrieved 7 September 2026.</p>
     <p>We use its de facto boundaries and mapped territories; inclusion does not imply political recognition. Small islands and borders are generalized. This is a fixed learning dataset, not a source of legal boundaries.</p>
-    <p>Drag to explore, use + and − to zoom, and select a point before checking your answer. Guest progress is saved in this browser, not across devices. Open Profile to see your identity or reset learning progress. Resetting requires confirmation and clears this app’s answers, proficiency, reviews, and diagnostic progress; it does not clear unrelated browser data.</p>
+    <p>Drag to explore, use + and − to zoom, and select a point before checking your answer. Guest progress is saved in this browser, not across devices. Open Profile to see your identity or reset learning progress. Resetting requires confirmation and clears this app’s answers, proficiency, and reviews; it does not clear unrelated browser data.</p>
     <h3>Name-to-location reviews</h3>
-    <p>Proficiency belongs to each country’s name-to-location skill, not to its capitals, facts, or other skills. On a new or diagnostic item, a miss means Learning and schedules a review in 10 minutes. A first success means Familiar and schedules a review in 1 day.</p>
+    <p>Proficiency belongs to each country’s name-to-location skill, not to its capitals, facts, or other skills. On a new item, a miss means Learning and schedules a review in 10 minutes. A first success means Familiar and schedules a review in 1 day.</p>
     <p>Successful scheduled reviews extend the interval to 3, 7, 14, then 30 days (the maximum), and mark the skill Retained. A success after a miss restarts at Familiar and 1 day. Any missed review resets it to Learning and 10 minutes.</p>
     <h3>Country difficulty progression</h3>
-    <p>New introductions begin with 16 recognizable countries across several regions, starting with Brazil, China, Australia, and India. Remaining countries and territories progress from larger to smaller main landmasses, leaving tiny islands and microstates until later. This is a map-selection difficulty guide, not a ranking of importance. New diagnostics use the first eight starter countries. Existing questions, diagnostic queues, and due reviews are preserved; reset your learning progress if you want a fresh start.</p>
-    <h3>Diagnostic and adaptive practice</h3>
-    <p>A diagnostic is an eight-item baseline without asking you to predeclare knowledge. Its answers update the same name-to-location proficiency used by continuous adaptive practice. Due reviews are selected oldest first. Otherwise, new countries are mixed with practice revisits: after two new introductions, an eligible previously seen country is selected, favoring its latest missed or guided answer, then the country least recently answered. Revisits normally have at least two intervening answers; new countries fill the gap while no revisit is eligible. Once every country has been introduced, practice continues with revisits. Stop whenever you like and resume from your saved question.</p>
+    <p>New introductions begin with 16 recognizable countries across several regions, starting with Brazil, China, Australia, and India. Remaining countries and territories progress from larger to smaller main landmasses, leaving tiny islands and microstates until later. This is a map-selection difficulty guide, not a ranking of importance. Existing questions and due reviews are preserved; reset your learning progress if you want a fresh start.</p>
+    <h3>Adaptive practice</h3>
+    <p>Practice starts directly and adapts as you answer. Due reviews are selected oldest first. Otherwise, new countries are mixed with practice revisits: after two new introductions, an eligible previously seen country is selected, favoring its latest missed or guided answer, then the country least recently answered. Revisits normally have at least two intervening answers; new countries fill the gap while no revisit is eligible. Once every country has been introduced, practice continues with revisits. Stop whenever you like and resume from your saved question.</p>
     <p>Practice revisits reinforce countries before their scheduled review. Their answers affect revisit selection, but do not change retention proficiency or review dates. Immediate retries also leave retention unchanged, and do not erase a miss when selecting future revisits. There are no batch limits or waiting screens.</p>
     <h3>Linked-map location help</h3>
     <p>Show linked maps reveals the country in a regional overview and a separate close-up. Clicking the overview moves the close-up; dragging or zooming the close-up moves its outlined window without moving the overview. Select a location in the close-up and use Check location as usual.</p>
@@ -103,7 +96,7 @@ app.innerHTML = `
     <button id="request-reset" class="secondary danger" type="button">Reset learning progress</button>
     <section id="reset-confirmation" aria-labelledby="reset-title" hidden>
       <h3 id="reset-title">Reset learning progress?</h3>
-      <p>This permanently deletes your answers, proficiency, scheduled reviews, and diagnostic progress in this browser. It cannot be undone.</p>
+      <p>This permanently deletes your answers, proficiency, and scheduled reviews in this browser. It cannot be undone.</p>
       <div class="profile-actions">
         <button id="cancel-reset" class="secondary" type="button">Cancel</button>
         <button id="confirm-reset" class="primary danger" type="button">Reset progress</button>
@@ -130,8 +123,8 @@ const profileResetError = document.querySelector<HTMLElement>('#profile-reset-er
 const proficiency = document.querySelector<HTMLElement>('#proficiency')!;
 const reviewAt = document.querySelector<HTMLTimeElement>('#review-at')!;
 const dateFormatter = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-const questionLabels: Record<'new' | 'review' | 'retry' | 'diagnostic' | 'practice', string> = {
-  new: 'New learning item', review: 'Scheduled review', retry: 'Immediate retry', diagnostic: 'Diagnostic item', practice: 'Practice revisit',
+const questionLabels: Record<'new' | 'review' | 'retry' | 'practice', string> = {
+  new: 'New learning item', review: 'Scheduled review', retry: 'Immediate retry', practice: 'Practice revisit',
 };
 let pendingPoint: L.LatLng | null = null;
 let marker: L.CircleMarker | undefined;
@@ -248,9 +241,7 @@ function renderFactCard(countryId: string, version: string) {
 }
 
 function renderQuestion() {
-  const diagnosticComplete = session.diagnosticComplete;
   document.querySelector<HTMLElement>('#welcome')!.hidden = session.started;
-  document.querySelector<HTMLElement>('#diagnostic-complete')!.hidden = !diagnosticComplete;
   const country = session.country;
   const answer = session.feedback;
   const showLinked = session.started && !!country && linkedOpen;
@@ -262,12 +253,10 @@ function renderQuestion() {
     linkedMaps.hide();
     map.invalidateSize({ pan: false });
   }
-  document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country || diagnosticComplete;
+  document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
   document.querySelector('#country')!.textContent = country?.properties.name ?? '';
   document.querySelector('#question-kind')!.textContent = session.questionKind ? questionLabels[session.questionKind] : '';
-  document.querySelector('#question-number')!.textContent = session.diagnosticNumber
-    ? `Diagnostic ${session.diagnosticNumber}/${session.diagnosticTotal}`
-    : `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
+  document.querySelector('#question-number')!.textContent = `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
   document.querySelector('#answered-count')!.textContent = String(session.attempts.length);
   document.querySelector('#correct-count')!.textContent = String(session.attempts.filter(attempt => attempt.correct && !attempt.assisted).length);
   const guidedCount = session.attempts.filter(attempt => attempt.assisted).length;
@@ -276,9 +265,9 @@ function renderQuestion() {
   guidedSummary.hidden = guidedCount === 0;
   const locationHelp = document.querySelector<HTMLButtonElement>('#location-help')!;
   locationHelp.textContent = answer ? 'Explore linked maps' : 'Show linked maps';
-  locationHelp.hidden = showLinked || session.mode === 'diagnostic';
+  locationHelp.hidden = showLinked;
   document.querySelector<HTMLElement>('#linked-actions')!.hidden = !showLinked;
-  document.querySelector<HTMLElement>('#help-warning')!.hidden = !!answer || showLinked || session.assisted || session.mode === 'diagnostic';
+  document.querySelector<HTMLElement>('#help-warning')!.hidden = !!answer || showLinked || session.assisted;
   document.querySelector<HTMLElement>('#guided-note')!.hidden = !session.assisted;
   document.querySelector('#detail-instructions')!.textContent = answer ? 'Answer recorded · drag or zoom to explore' : 'Drag or zoom, then click to select';
   storageNotice.textContent = session.storageNotice;
@@ -292,7 +281,7 @@ function renderQuestion() {
   factCard.hidden = true;
   factCard.replaceChildren();
   next.hidden = !answer;
-  retry.hidden = !answer || answer.correct || session.mode === 'diagnostic';
+  retry.hidden = !answer || answer.correct;
   document.querySelector<HTMLElement>('#retry-note')!.hidden = session.questionKind !== 'retry';
   document.querySelector<HTMLElement>('#practice-note')!.hidden = session.questionKind !== 'practice';
   check.hidden = !!answer;
@@ -368,16 +357,6 @@ map.on('click', (event: L.LeafletMouseEvent) => {
 });
 document.querySelector('#start')!.addEventListener('click', () => {
   session.start();
-  linkedOpen = false;
-  renderQuestion();
-});
-document.querySelector('#start-diagnostic')!.addEventListener('click', () => {
-  session.startDiagnostic();
-  linkedOpen = false;
-  renderQuestion();
-});
-document.querySelector('#start-adaptive')!.addEventListener('click', () => {
-  session.startAdaptive();
   linkedOpen = false;
   renderQuestion();
 });

@@ -29,14 +29,14 @@ const legacyProgressSchema = z.object({
   && (state.started || (state.cursor === 0 && state.attempts.length === 0))
   && state.attempts.every((attempt, index) => attempt.countryId === countries[index % countries.length].properties.id),
 );
-const questionKindSchema = z.enum(['new', 'review', 'practice', 'retry', 'diagnostic']);
+const questionKindSchema = z.enum(['new', 'review', 'practice', 'retry']);
 const questionSchema = z.object({
   countryId: countryIdSchema,
   kind: questionKindSchema,
   assisted: z.boolean().default(false),
 });
-const progressV2Schema = z.object({
-  version: z.literal(2),
+const progressSchema = z.object({
+  version: z.literal(5),
   started: z.boolean(),
   cursor: z.number().int().nonnegative(),
   current: questionSchema.nullable(),
@@ -47,26 +47,16 @@ const progressV2Schema = z.object({
     && (state.started || (state.cursor === 0 && state.attempts.length === 0))
     && (!answer || (answer.countryId === state.current?.countryId && answer.kind === state.current.kind));
 });
-const diagnosticSchema = z.object({
-  countries: z.array(countryIdSchema).min(1),
-  index: z.number().int().nonnegative(),
-});
-const progressSchema = z.object({
-  version: z.literal(4),
-  started: z.boolean(),
-  cursor: z.number().int().nonnegative(),
-  current: questionSchema.nullable(),
-  attempts: z.array(attemptSchema.extend({ kind: questionKindSchema })),
-  mode: z.enum(['adaptive', 'diagnostic']),
-  diagnostic: diagnosticSchema.nullable(),
-}).refine(state => {
-  const answer = state.attempts[state.cursor];
-  return (state.attempts.length === state.cursor || state.attempts.length === state.cursor + 1)
-    && (state.started || (state.cursor === 0 && state.attempts.length === 0))
-    && (!answer || (answer.countryId === state.current?.countryId && answer.kind === state.current.kind))
-    && (state.mode === 'diagnostic' ? state.diagnostic !== null : state.diagnostic === null)
-    && (!state.current || state.current.kind !== 'diagnostic' || state.mode === 'diagnostic');
-});
+
+// Earlier saves assessed diagnostic answers exactly like new learning items.
+const previousKindSchema = questionKindSchema.or(z.literal('diagnostic'))
+  .transform(kind => kind === 'diagnostic' ? 'new' as const : kind);
+const previousProgressSchema = z.object({
+  ...progressSchema.shape,
+  version: z.union([z.literal(2), z.literal(3), z.literal(4)]),
+  current: questionSchema.extend({ kind: previousKindSchema }).nullable(),
+  attempts: z.array(attemptSchema.extend({ kind: previousKindSchema })),
+}).transform(state => progressSchema.parse({ ...state, version: 5 }));
 
 type Attempt = z.infer<typeof progressSchema>['attempts'][number];
 type Proficiency = {
@@ -76,13 +66,11 @@ type Proficiency = {
 };
 const reviewIntervals = [1, 3, 7, 14, 30];
 const day = 24 * 60 * 60 * 1000;
-const diagnosticItemCount = 8;
 
 function initialState(): z.infer<typeof progressSchema> {
   return {
-    version: 4, started: false, cursor: 0, attempts: [],
+    version: 5, started: false, cursor: 0, attempts: [],
     current: { countryId: introductionOrder[0].properties.id, kind: 'new', assisted: false },
-    mode: 'adaptive', diagnostic: null,
   };
 }
 
@@ -103,33 +91,24 @@ export class GuestSession {
       if (parsed.version === 1) {
         const legacy = legacyProgressSchema.parse(parsed);
         this.state = {
-          ...legacy, version: 4,
+          ...legacy, version: 5,
           current: {
             countryId: countries[legacy.cursor % countries.length].properties.id,
             kind: 'new',
             assisted: legacy.attempts[legacy.cursor]?.assisted ?? false,
           },
           attempts: legacy.attempts.map(attempt => ({ ...attempt, kind: 'new' as const })),
-          mode: 'adaptive',
-          diagnostic: null,
         };
-      } else if (parsed.version === 2) {
-        const legacy = progressV2Schema.parse(parsed);
-        this.state = {
-          ...legacy,
-          version: 4,
-          mode: 'adaptive',
-          diagnostic: null,
-        };
+      } else if (parsed.version === 2 || parsed.version === 3 || parsed.version === 4) {
+        this.state = previousProgressSchema.parse(parsed);
       } else {
-        // Version 3's obsolete session cap is discarded by the current schema.
-        this.state = progressSchema.parse(parsed.version === 3 ? { ...parsed, version: 4 } : parsed);
+        this.state = progressSchema.parse(parsed);
       }
       if (!this.started) this.state = initialState();
       this.attempts.forEach((attempt, index) => this.recordAttempt(attempt, index));
-      const waiting = this.started && this.state.mode === 'adaptive' && !this.state.current;
+      const waiting = this.started && !this.state.current;
       if (waiting) this.state.current = this.selectAdaptive(new Date().toISOString());
-      if (waiting || parsed.version !== 4) this.save();
+      if (waiting || parsed.version !== 5) this.save();
     } catch {
       this.storageNotice = 'Saved guest progress could not be read. Starting a session will replace any unreadable save. Browser storage must be available to retain new progress.';
     }
@@ -138,19 +117,6 @@ export class GuestSession {
   get started() { return this.state.started; }
   get cursor() { return this.state.cursor; }
   get attempts() { return this.state.attempts; }
-  get mode() { return this.state.mode; }
-  get diagnosticComplete() {
-    return this.state.mode === 'diagnostic'
-      && !!this.state.diagnostic
-      && this.state.diagnostic.index >= this.state.diagnostic.countries.length
-      && !this.country;
-  }
-  get diagnosticNumber() {
-    return this.state.current?.kind === 'diagnostic' && this.state.diagnostic
-      ? this.state.diagnostic.index + 1
-      : undefined;
-  }
-  get diagnosticTotal() { return this.state.diagnostic?.countries.length; }
   get questionKind() { return this.state.current?.kind; }
   get assisted() { return this.state.current?.assisted ?? false; }
   get country() { return this.state.current ? countriesById.get(this.state.current.countryId)! : null; }
@@ -176,33 +142,13 @@ export class GuestSession {
 
   start() {
     this.state.started = true;
-    this.state.mode = 'adaptive';
-    this.state.diagnostic = null;
     if (!this.state.current) this.state.current = this.selectAdaptive(new Date().toISOString());
     this.save();
   }
 
-  startDiagnostic() {
-    const diagnosticCountries = introductionOrder.slice(0, diagnosticItemCount).map(country => country.properties.id);
-    this.state.started = true;
-    this.state.mode = 'diagnostic';
-    this.state.cursor = this.attempts.length;
-    this.state.diagnostic = { countries: diagnosticCountries, index: 0 };
-    this.state.current = { countryId: diagnosticCountries[0], kind: 'diagnostic', assisted: false };
-    this.save();
-  }
-
-  startAdaptive() {
-    this.state.started = true;
-    this.state.mode = 'adaptive';
-    this.state.diagnostic = null;
-    this.state.cursor = this.attempts.length;
-    this.state.current = this.selectAdaptive(new Date().toISOString());
-    this.save();
-  }
 
   requestLocationHelp() {
-    if (!this.started || !this.state.current || this.feedback || this.assisted || this.state.mode === 'diagnostic') return;
+    if (!this.started || !this.state.current || this.feedback || this.assisted) return;
     this.state.current.assisted = true;
     this.save();
   }
@@ -275,7 +221,7 @@ export class GuestSession {
   }
 
   retry() {
-    if (this.state.mode === 'diagnostic' || !this.feedback || this.feedback.correct) return;
+    if (!this.feedback || this.feedback.correct) return;
     this.state.current = { countryId: this.feedback.countryId, kind: 'retry', assisted: this.feedback.assisted };
     this.state.cursor = this.attempts.length;
     this.save();
@@ -321,15 +267,6 @@ export class GuestSession {
   next() {
     if (!this.started || (this.state.current && !this.feedback)) return;
     this.state.cursor = this.attempts.length;
-    if (this.state.mode === 'diagnostic') {
-      const diagnostic = this.state.diagnostic!;
-      diagnostic.index += 1;
-      this.state.current = diagnostic.index < diagnostic.countries.length
-        ? { countryId: diagnostic.countries[diagnostic.index], kind: 'diagnostic', assisted: false }
-        : null;
-      this.save();
-      return;
-    }
     this.state.current = this.selectAdaptive(new Date().toISOString());
     this.save();
   }

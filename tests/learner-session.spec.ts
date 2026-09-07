@@ -8,9 +8,8 @@ async function seedQuestion(page: Page, countryId: string) {
   await page.addInitScript(id => {
     if (localStorage.getItem('atlas-practice.guest') !== null) return;
     localStorage.setItem('atlas-practice.guest', JSON.stringify({
-      version: 4, started: true, cursor: 0, attempts: [],
+      version: 5, started: true, cursor: 0, attempts: [],
       current: { countryId: id, kind: 'new', assisted: false },
-      mode: 'adaptive', diagnostic: null,
     }));
   }, countryId);
 }
@@ -21,35 +20,34 @@ test('a guest starts a country name-to-location session without an account', asy
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByRole('region', { name: 'World map' })).toBeVisible();
 });
-test('a new learner can complete a diagnostic and continue into adaptive practice', async ({ page }) => {
+test('a completed legacy diagnostic resumes continuous practice with its learning history', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
+  await page.addInitScript(() => {
+    if (localStorage.getItem('atlas-practice.guest') !== null) return;
+    const ids = ['AFG', 'ALD', 'ALB', 'DZA', 'ASM', 'AND', 'AGO', 'AIA'];
+    localStorage.setItem('atlas-practice.guest', JSON.stringify({
+      version: 3, started: true, cursor: 8, current: null,
+      mode: 'diagnostic', diagnostic: { countries: ids, index: 8 }, newItemsThisSession: 0,
+      attempts: ids.map(countryId => ({
+        countryId, skill: 'name-to-location', kind: 'diagnostic',
+        boundaryVersion: 'natural-earth-5.1.2-50m',
+        longitude: 0, latitude: 0, correct: false, assisted: false,
+        selectedCountry: null, answeredAt: '2026-09-08T12:00:00.000Z',
+      })),
+    }));
+  });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Start diagnostic' }).click();
-  await expect(page.getByText('Diagnostic item', { exact: true })).toBeVisible();
-  const diagnosticCountries = ['Brazil', 'China', 'Australia', 'India', 'United States', 'Canada', 'Russia', 'Mexico'];
-  for (let item = 0; item < 8; item += 1) {
-    await expect(page.getByRole('heading', { name: new RegExp(diagnosticCountries[item]) })).toBeVisible();
-    await answerWorldPoint(page, 0, 0);
-    if (item === 3) {
-      await page.reload();
-      await expect(page.getByText('4 answered · 0 correct', { exact: true })).toBeVisible();
-      await expect(page.getByRole('status')).toContainText('Not quite');
-    }
-    if (item < 7) await page.getByRole('button', { name: 'Next learning item' }).click();
-    if (item === 3) {
-      await page.reload();
-      await expect(page.getByText('Diagnostic 5/8', { exact: true })).toBeVisible();
-      await expect(page.getByRole('heading', { name: /United States/ })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Check location' })).toBeVisible();
-    }
-  }
-  await page.getByRole('button', { name: 'Next learning item' }).click();
-  await expect(page.getByRole('heading', { name: /Diagnostic complete/ })).toBeVisible();
-  await expect(page.getByText('8 answered · 0 correct', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Afghanistan/ })).toBeVisible();
+  await expect(page.getByText('Practice revisit', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Practice results')).toContainText('8 answered');
   await page.reload();
-  await expect(page.getByRole('heading', { name: /Diagnostic complete/ })).toBeVisible();
-  await page.getByRole('button', { name: 'Continue adaptive practice' }).click();
+  await answerWorldPoint(page, 67, 34);
+  const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
+  await expect(proficiency).toContainText('Learning');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-08T12:10:00.000Z');
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByText('New learning item', { exact: true })).toBeVisible();
-  await expect(page.getByRole('heading', { name: /Argentina/ })).toBeVisible();
 });
 test('adaptive practice prioritizes a due review before a new country', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
@@ -165,8 +163,7 @@ test('later introductions progress from larger island landmasses to small island
     // A just-completed revisit leaves the next slot open for an introduction.
     attempts.push({ ...attempts[attempts.length - 1], kind: 'practice' });
     localStorage.setItem('atlas-practice.guest', JSON.stringify({
-      version: 4, started: true, cursor: attempts.length, current: null,
-      attempts, mode: 'adaptive', diagnostic: null,
+      version: 5, started: true, cursor: attempts.length, current: null, attempts,
     }));
   }, countryData);
   await page.goto('/');
@@ -212,7 +209,7 @@ test('a legacy alphabetical save preserves its pending territory before using th
   await expect(page.getByText('2 answered · 1 correct', { exact: true })).toBeVisible();
 });
 
-test('an in-progress diagnostic keeps its saved alphabetical queue across reloads', async ({ page }) => {
+test('a pending legacy diagnostic becomes ordinary practice without losing answers', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
   await page.addInitScript(() => {
     if (localStorage.getItem('atlas-practice.guest') !== null) return;
@@ -231,14 +228,18 @@ test('an in-progress diagnostic keeps its saved alphabetical queue across reload
   });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: /Albania/ })).toBeVisible();
-  await expect(page.getByText('Diagnostic 3/8', { exact: true })).toBeVisible();
+  await expect(page.getByText('New learning item', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByRole('heading', { name: /Albania/ })).toBeVisible();
   await answerWorldPoint(page, 19.5, 41.3);
+  await page.reload();
+  await expect(page.getByRole('status')).toContainText('Correct');
+  await expect(page.getByRole('region', { name: 'Name-to-location proficiency' }).locator('time'))
+    .toHaveAttribute('datetime', '2026-09-09T12:00:00.000Z');
   await page.getByRole('button', { name: 'Next learning item' }).click();
   await page.reload();
-  await expect(page.getByRole('heading', { name: /Algeria/ })).toBeVisible();
-  await expect(page.getByText('Diagnostic 4/8', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: /Afghanistan/ })).toBeVisible();
+  await expect(page.getByText('Practice revisit', { exact: true })).toBeVisible();
   await expect(page.getByText('3 answered · 1 correct', { exact: true })).toBeVisible();
 });
 

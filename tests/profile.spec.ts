@@ -6,8 +6,7 @@ test.beforeEach(async ({ page }) => {
     if (localStorage.getItem('atlas-practice.guest') !== null) return;
     localStorage.setItem('unrelated.preference', 'keep-me');
     localStorage.setItem('atlas-practice.guest', JSON.stringify({
-      version: 4, started: true, cursor: 2,
-      mode: 'adaptive', diagnostic: null,
+      version: 5, started: true, cursor: 2,
       current: { countryId: 'ALD', kind: 'new', assisted: true },
       attempts: ['BRA', 'CHN'].map(countryId => ({
         countryId, skill: 'name-to-location', kind: 'new',
