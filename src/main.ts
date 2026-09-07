@@ -13,9 +13,9 @@ const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
   <div id="map" role="region" aria-label="World map"></div>
   <section id="globe" role="region" aria-label="World globe" hidden>
-    <div class="globe-zoom">
-      <button id="globe-zoom-in" class="secondary" type="button" aria-label="Zoom in on globe">+</button>
-      <button id="globe-zoom-out" class="secondary" type="button" aria-label="Zoom out on globe">−</button>
+    <div class="globe-zoom map-zoom">
+      <button id="globe-zoom-in" type="button" aria-label="Zoom in on globe">+</button>
+      <button id="globe-zoom-out" type="button" aria-label="Zoom out on globe">−</button>
     </div>
     <p id="globe-instructions">Drag to rotate · scroll or pinch to zoom · click to select.<br>Keyboard: arrows rotate, +/− zoom, Enter selects the centre.</p>
     <small class="globe-attribution">Natural Earth · Public domain</small>
@@ -179,7 +179,7 @@ const map = L.map('map', {
   fadeAnimation: false, doubleClickZoom: false,
   maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1,
 }).setView([15, 0], app.clientWidth <= 700 ? 1 : 2);
-L.control.zoom({ position: 'topright' }).addTo(map);
+L.control.zoom({ position: 'topright' }).addTo(map).getContainer()!.classList.add('map-zoom');
 const presentationControl = new L.Control({ position: 'topright' });
 presentationControl.onAdd = () => presentationTools;
 L.DomEvent.disableClickPropagation(presentationTools);
