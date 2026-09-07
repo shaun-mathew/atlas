@@ -14,6 +14,7 @@
     "@turf/boolean-point-in-polygon": "^7.3.4",
     "@turf/point-to-polygon-distance": "^7.3.4",
     "leaflet": "^1.9.4",
+    "three": "^0.185.1",
     "zod": "^4.0.0"
   },
   "devDependencies": {
@@ -21,6 +22,7 @@
     "@types/geojson": "^7946.0.16",
     "@types/leaflet": "^1.9.20",
     "@types/node": "^26.4.1",
+    "@types/three": "^0.185.4",
     "typescript": "^5.9.2",
     "vite": "^7.1.4"
   }
