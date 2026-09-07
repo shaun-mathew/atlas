@@ -45,10 +45,10 @@ app.innerHTML = `
     </button>
     <span id="globe-notice" role="alert" hidden></span>
   </div>
+  </div>
+  </div>
     <button id="reset-map" class="secondary" type="button" aria-label="World view" title="World view"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg></button>
-  </div>
-  </div>
-  <p id="progress" class="progress" aria-label="Practice results"><span id="answered-count">0</span> answered <span class="progress-divider">·</span> <span id="correct-count">0</span> correct<span id="guided-count" hidden></span></p>
+  <p id="progress" class="progress" aria-label="Practice results"><span class="progress-stat"><span id="answered-count">0</span> answered</span> <span class="progress-divider">·</span> <span class="progress-stat"><span id="correct-count">0</span> correct</span><span id="guided-count" hidden></span></p>
   <div class="session-panel">
     <section id="current-facets" class="current-facets" aria-label="Current practice selection" hidden>
       <p id="current-facet-description"></p>
@@ -138,6 +138,8 @@ let linkedOpen = session.assisted;
 let globe: Globe | undefined;
 let globeOpen = false;
 const globeContainer = document.querySelector<HTMLElement>('#globe')!;
+const detailMapContainer = document.querySelector<HTMLElement>('#detail-map')!;
+const worldViewButton = document.querySelector<HTMLButtonElement>('#reset-map')!;
 const presentationButton = document.querySelector<HTMLButtonElement>('#toggle-presentation')!;
 const zoomInButton = document.querySelector<HTMLButtonElement>('#zoom-in')!;
 const zoomOutButton = document.querySelector<HTMLButtonElement>('#zoom-out')!;
@@ -197,11 +199,26 @@ const map = L.map('map', {
   maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1,
 }).setView([15, 0], app.clientWidth <= 700 ? 1 : 2);
 map.on('zoomend', updateZoomControls);
+// Anchor the mobile reset action to the visible map, above its attribution or question card.
+const worldViewPosition = new ResizeObserver(() => {
+  if (app.clientWidth > 700) return;
+  const surface = globeOpen ? globeContainer : app.classList.contains('has-linked-maps') ? detailMapContainer : map.getContainer();
+  const bounds = surface.getBoundingClientRect();
+  const container = app.getBoundingClientRect();
+  const bottom = Math.min(bounds.bottom, panel.getBoundingClientRect().top);
+  const inset = bottom < bounds.bottom ? 12 : 24;
+  worldViewButton.style.setProperty('--map-control-top', `${Math.max(bounds.top, bottom - 34 - inset) - container.top}px`);
+  worldViewButton.style.setProperty('--map-control-right', `${container.right - bounds.right + 12}px`);
+});
+worldViewPosition.observe(panel);
+worldViewPosition.observe(map.getContainer());
+worldViewPosition.observe(globeContainer);
+worldViewPosition.observe(detailMapContainer);
 map.attributionControl.addAttribution('Natural Earth · Public domain');
 const boundaries = L.geoJSON(countries, {
   style: { color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1 },
 }).addTo(map);
-const linkedMaps = new LinkedMaps(map, document.querySelector<HTMLElement>('#detail-map')!, selectPoint);
+const linkedMaps = new LinkedMaps(map, detailMapContainer, selectPoint);
 
 // A projected square grid stays aligned with the map while extending beyond
 // geographic bounds to fill the entire canvas, including portrait viewports.

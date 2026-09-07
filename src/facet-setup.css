@@ -55,7 +55,8 @@ body:has(> .facet-setup[open]) .session-panel { visibility: hidden; }
   .facet-steps { padding: 20px 24px; gap: 14px; }
 }
 @media (max-width: 700px) {
-  .practice-toolbar { top: calc(155px + env(safe-area-inset-top, 0px)); left: 32px; right: 12px; }
+  .practice-toolbar { display: contents; }
+  .learning-modes { position: absolute; z-index: 3; top: calc(78px + env(safe-area-inset-top, 0px)); left: 18px; right: calc(18px + 96px + 12px); }
   .learning-modes .secondary { font-size: 11px; }
   .current-facets { margin-bottom: 12px; padding: 10px; }
   .facet-setup { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }

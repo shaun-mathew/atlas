@@ -21,7 +21,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .fact-card:focus-v
 .secondary:hover { background: #2b3d47; border-color: #ffffff4d; }
 .profile-button { position: fixed; right: 24px; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); width: 42px; height: 42px; flex-shrink: 0; padding: 0; }
 .progress { position: absolute; top: calc(32px + env(safe-area-inset-top, 0px)); right: 34px; z-index: 2; margin: 0; color: var(--muted); font-size: 11px; pointer-events: none; }
-.progress > span:not(.progress-divider) { margin-right: 4px; color: #f5f4e9; font-family: ui-monospace, monospace; font-size: 21px; font-variant-numeric: tabular-nums; }
+.progress-stat { white-space: nowrap; }
+.progress-stat > span { margin-right: 4px; color: #f5f4e9; font-family: ui-monospace, monospace; font-size: 21px; font-variant-numeric: tabular-nums; }
 .progress #correct-count { color: var(--accent); }
 .progress-divider { margin: 0 16px; color: #ffffff50; }
 .session-panel { position: absolute; z-index: 3; top: calc(170px + env(safe-area-inset-top, 0px)); left: 38px; width: 360px; max-height: calc(100dvh - 200px - env(safe-area-inset-top, 0px)); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #536570 transparent; }
@@ -105,9 +106,9 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
   .brand-subtitle { display: none; }
   .secondary { min-height: 40px; padding: 0 10px; font-size: 11px; }
   .profile-button { position: static; width: 40px; height: 40px; padding: 0; }
-  .progress { top: calc(78px + env(safe-area-inset-top, 0px)); left: 23px; right: auto; font-size: 10px; }
-  .progress > span:not(.progress-divider) { font-size: 14px; }
-  .progress-divider { margin: 0 10px; }
+  .progress { top: calc(78px + env(safe-area-inset-top, 0px)); left: auto; right: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; width: 96px; font-size: 10px; }
+  .progress-stat > span { font-size: 14px; }
+  .progress-divider { display: none; }
   .session-panel { top: auto; left: 12px; right: 12px; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: auto; max-height: min(58dvh, calc(100dvh - 160px)); padding: 19px 19px 16px; border: 1px solid #ffffff24; border-radius: 21px; background: #14242ef5; box-shadow: 0 14px 42px #00000038, inset 0 1px 0 #ffffff07; }
   .eyebrow { gap: 7px; font-size: 9px; letter-spacing: 1.1px; }
   .prompt { display: inline-block; margin: 15px 7px 0 0; font-size: 20px; letter-spacing: -0.7px; }
@@ -215,8 +216,9 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 }
 @media (max-width: 700px) {
   .map-zoom { display: none; }
-  #reset-map { position: static; flex-shrink: 0; }
-  #globe-instructions { font-size: 9px; bottom: 18px; }
+  .view-tools { position: absolute; z-index: 3; top: calc(155px + env(safe-area-inset-top, 0px)); right: 18px; }
+  #reset-map { position: absolute; top: var(--map-control-top); right: var(--map-control-right, 12px); bottom: auto; }
+  #globe-instructions { right: 54px; font-size: 9px; bottom: 18px; }
 }
 @media (max-height: 520px) {
   #app.has-globe { padding-top: 400px; }
