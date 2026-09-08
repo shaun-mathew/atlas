@@ -7,6 +7,7 @@ import { Accounts } from './accounts';
 import { createAccountProfile } from './account-profile';
 import { LinkedMaps } from './linked-maps';
 import { MapPin } from './map-pin';
+import { GeographyRenderer } from './geography-renderer';
 import { Globe } from './globe';
 import { createFacetSetup } from './facet-setup';
 import { describeFacets } from './facets';
@@ -208,7 +209,7 @@ const map = L.map('map', {
   minZoom: 1, maxZoom: 10, zoomControl: false, zoomAnimation: !reducedMotion.matches,
   markerZoomAnimation: !reducedMotion.matches, fadeAnimation: false, doubleClickZoom: false,
   inertia: !reducedMotion.matches, inertiaMaxSpeed: 900, inertiaDeceleration: 16000,
-  renderer: L.svg({ padding: 0.5 }),
+  renderer: new GeographyRenderer({ padding: 0.5 }),
 }).setView([15, 0], app.clientWidth <= 700 ? 1 : 2);
 map.on('zoomend', () => {
   if (worldZoomTarget !== undefined && map.getZoom() !== worldZoomTarget) {
@@ -262,9 +263,9 @@ worldViewPosition.observe(map.getContainer());
 worldViewPosition.observe(globeContainer);
 worldViewPosition.observe(detailMapContainer);
 map.attributionControl.addAttribution('Natural Earth · Public domain');
-const boundaries = L.geoJSON(countries, {
-  style: { color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1 },
-}).addTo(map);
+// Keep the same coastline through CSS zooms and the final reprojection.
+const boundaryStyle: L.PolylineOptions = { smoothFactor: 0, color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1 };
+const boundaries = L.geoJSON(countries, { style: boundaryStyle }).addTo(map);
 const linkedMaps = new LinkedMaps(map, detailMapContainer, selectPoint);
 
 // Keep the infinite projected grid in Leaflet's pane so pan and zoom move it

@@ -2,13 +2,17 @@ import L from 'leaflet';
 import type { Polygon } from 'geojson';
 import { countries, polygonArea, type Country } from './geography';
 import { MapPin, type MapProjection } from './map-pin';
+import { GeographyRenderer } from './geography-renderer';
 
 type Answer = { longitude: number; latitude: number; correct: boolean };
 type LandMass = { country: Country; geometry: Polygon; bounds: L.LatLngBounds; area: number; anchor?: L.LatLng };
 type Frame = { primary: LandMass; region: L.LatLngBounds; detail: L.LatLngBounds };
-type Copies = Map<LandMass, { shift: number; layer: L.GeoJSON }>;
-const boundaryStyle: L.PathOptions = { color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1, interactive: false };
-const targetStyle: L.PathOptions = { color: '#e3f5b1', weight: 2, fillColor: '#a2c472', fillOpacity: 0.85, interactive: false, className: 'linked-target' };
+type Copies = Map<LandMass, Map<number, L.GeoJSON>>;
+type Label = { part: LandMass; anchor: L.LatLng; marker: L.Marker; span: HTMLSpanElement; width: number; visible: boolean };
+type Labels = Map<string, Label>;
+// Simplifying again at each zoom changes the coastline after the CSS animation.
+const boundaryStyle: L.PolylineOptions = { smoothFactor: 0, color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1, interactive: false };
+const targetStyle: L.PolylineOptions = { smoothFactor: 0, color: '#e3f5b1', weight: 2, fillColor: '#a2c472', fillOpacity: 0.85, interactive: false, className: 'linked-target' };
 const frames = new Map<string, Frame>();
 let landMasses: LandMass[] | undefined;
 
@@ -133,14 +137,16 @@ export class LinkedMaps {
   private reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   private zoomTarget?: number;
   private viewportFrame = 0;
+  private coverageFrame = 0;
+  private coverage = new Map<L.Map, L.LatLngBounds>();
   private zoomProjections = new Map<L.Map, MapProjection>();
   private originalZoomSnap?: number;
   private overviewTarget?: L.GeoJSON;
   private detailTarget?: L.GeoJSON;
   private viewport?: L.SVGOverlay;
   private pin?: MapPin;
-  private overviewLabels = L.layerGroup();
-  private detailLabels = L.layerGroup();
+  private overviewLabels: Labels = new Map();
+  private detailLabels: Labels = new Map();
   private overviewCopies: Copies = new Map();
   private detailCopies: Copies = new Map();
   private overviewScale = L.control.scale({ imperial: false, position: 'bottomleft' });
@@ -166,10 +172,10 @@ export class LinkedMaps {
       this.originalZoomSnap = this.overview.options.zoomSnap;
       this.overview.options.zoomSnap = 0.25;
       this.overview.on('click', this.navigate);
+      this.overview.on('move', this.scheduleCoverage);
       this.overview.on('moveend', this.refreshOverview);
       this.overview.on('zoomanim', this.startZoom);
       this.overview.on('zoomend', this.endZoom);
-      this.overviewLabels.addTo(this.overview);
       this.overviewScale.addTo(this.overview);
       this.observer.observe(this.overview.getContainer());
       this.observer.observe(this.detailContainer);
@@ -183,14 +189,14 @@ export class LinkedMaps {
         minZoom: 1, maxZoom: 16, zoomSnap: 0.25, zoomControl: false,
         zoomAnimation: !this.reducedMotion.matches, fadeAnimation: false, markerZoomAnimation: !this.reducedMotion.matches,
         doubleClickZoom: false, inertia: !this.reducedMotion.matches, inertiaMaxSpeed: 900, inertiaDeceleration: 16000,
-        renderer: L.svg({ padding: 0.5 }),
+        renderer: new GeographyRenderer({ padding: 0.5 }),
       });
       L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(this.detail);
       this.detail.attributionControl.addAttribution('Natural Earth · Public domain');
       L.geoJSON(countries, { style: boundaryStyle, interactive: false }).addTo(this.detail);
-      this.detailLabels.addTo(this.detail);
       this.detail.on('click', this.select);
       this.detail.on('move zoom', this.syncViewport);
+      this.detail.on('move', this.scheduleCoverage);
       this.detail.on('moveend', this.refreshDetail);
       this.detail.on('zoomanim', this.startZoom);
       this.detail.on('zoomend', this.endZoom);
@@ -231,6 +237,7 @@ export class LinkedMaps {
     cancelAnimationFrame(this.resizeFrame);
     this.overview.off('click', this.navigate);
     this.overview.off('moveend', this.refreshOverview);
+    this.overview.off('move', this.scheduleCoverage);
     this.overview.off('zoomanim', this.startZoom);
     this.overview.off('zoomend', this.endZoom);
     this.overviewTarget?.remove();
@@ -241,8 +248,8 @@ export class LinkedMaps {
     this.viewport = undefined;
     this.pin?.remove();
     this.pin = undefined;
-    this.overviewLabels.clearLayers().remove();
-    this.detailLabels.clearLayers();
+    this.clearLabels(this.overviewLabels);
+    this.clearLabels(this.detailLabels);
     this.clearCopies(this.overviewCopies);
     this.clearCopies(this.detailCopies);
     this.overviewScale.remove();
@@ -268,6 +275,9 @@ export class LinkedMaps {
   private stopMovement(): void {
     this.zoomTarget = undefined;
     cancelAnimationFrame(this.viewportFrame);
+    cancelAnimationFrame(this.coverageFrame);
+    this.coverageFrame = 0;
+    this.coverage.clear();
     this.zoomProjections.clear();
     for (const map of [this.overview, this.detail]) {
       if (!map || map.getZoom() === undefined) continue;
@@ -342,6 +352,11 @@ export class LinkedMaps {
   private startZoom = (event: L.ZoomAnimEvent): void => {
     if (!this.active) return;
     const map = event.target as L.Map;
+    // Zoom-out needs the destination's wrapped land before the animation ends.
+    const half = map.getSize().divideBy(2);
+    const center = map.project(event.center, event.zoom);
+    const destination = L.latLngBounds(map.unproject(center.subtract(half), event.zoom), map.unproject(center.add(half), event.zoom));
+    this.refreshCopies(map, map === this.overview ? this.overviewCopies : this.detailCopies, destination.extend(map.getBounds()));
     if (!this.zoomProjections.has(map)) {
       this.zoomProjections.set(map, { zoom: map.getZoom(), origin: map.getPixelOrigin() });
     }
@@ -391,6 +406,16 @@ export class LinkedMaps {
     }
     this.viewport.bringToFront();
   };
+  private scheduleCoverage = (): void => {
+    if (!this.active || this.resizing || this.coverageFrame) return;
+    this.coverageFrame = requestAnimationFrame(() => {
+      this.coverageFrame = 0;
+      if (!this.active) return;
+      this.refreshCopies(this.overview, this.overviewCopies);
+      if (this.detail) this.refreshCopies(this.detail, this.detailCopies);
+    });
+  };
+
 
   private refreshOverview = (): void => {
     if (!this.active || this.resizing) return;
@@ -405,60 +430,115 @@ export class LinkedMaps {
   };
 
   private clearCopies(copies: Copies): void {
-    for (const copy of copies.values()) copy.layer.remove();
+    for (const shifts of copies.values()) for (const layer of shifts.values()) layer.remove();
     copies.clear();
+    this.coverage.clear();
   }
 
-  private refreshMap(map: L.Map, labels: L.LayerGroup, copies: Copies): void {
-    const bounds = map.getBounds();
-    const longitude = map.getCenter().lng;
-    for (const [part, copy] of copies) {
-      if (copy.shift !== shiftFor(part, longitude) || !intersects(part, copy.shift, bounds)) {
-        copy.layer.remove();
-        copies.delete(part);
+  private clearLabels(labels: Labels): void {
+    for (const label of labels.values()) label.marker.remove();
+    labels.clear();
+  }
+
+  private refreshCopies(map: L.Map, copies: Copies, view = map.getBounds()): void {
+    const previous = this.coverage.get(map);
+    // Reuse the buffer during small moves instead of scanning all land per frame.
+    if (previous?.contains(view)) return;
+    const bounds = view.pad(0.5);
+    const retained = view.pad(0.75);
+    this.coverage.set(map, bounds.pad(-0.2));
+    for (const [part, shifts] of copies) {
+      for (const [shift, layer] of shifts) {
+        if (!intersects(part, shift, retained)) {
+          layer.remove();
+          shifts.delete(shift);
+        }
       }
+      if (!shifts.size) copies.delete(part);
     }
-    const candidates = new Map<string, { part: LandMass; shift: number }>();
     for (const part of geography()) {
-      const shift = shiftFor(part, longitude);
-      if (!intersects(part, shift, bounds)) continue;
-      if (shift && !copies.has(part)) {
-        // Only visible wrapped components need extra Leaflet geometry; the
-        // ordinary dataset remains shared and untouched on both maps.
+      if (part.bounds.getSouth() > bounds.getNorth() || part.bounds.getNorth() < bounds.getSouth()) continue;
+      const first = Math.ceil((bounds.getWest() - part.bounds.getEast()) / 360);
+      const last = Math.floor((bounds.getEast() - part.bounds.getWest()) / 360);
+      for (let world = first; world <= last; world++) {
+        if (!world) continue; // The base dataset already supplies the original world.
+        const shift = world * 360;
+        let shifts = copies.get(part);
+        if (shifts?.has(shift)) continue;
         const layer = L.geoJSON(part.geometry, {
           coordsToLatLng: coordinate => L.latLng(coordinate[1], coordinate[0] + shift),
           style: part.country.properties.id === this.country?.properties.id ? targetStyle : boundaryStyle, interactive: false,
         }).addTo(map);
-        copies.set(part, { shift, layer });
+        if (!shifts) copies.set(part, shifts = new Map());
+        shifts.set(shift, layer);
       }
-      const previous = candidates.get(part.country.properties.id);
-      if (!previous || part.area > previous.part.area) candidates.set(part.country.properties.id, { part, shift });
     }
-    labels.clearLayers();
+  }
+
+  private refreshMap(map: L.Map, labels: Labels, copies: Copies): void {
+    this.refreshCopies(map, copies);
+    const bounds = map.getBounds();
+    const longitude = map.getCenter().lng;
+    const candidates = new Map<string, { part: LandMass; shift: number }>();
+    for (const part of geography()) {
+      const shift = shiftFor(part, longitude);
+      if (!intersects(part, shift, bounds)) continue;
+      const id = part.country.properties.id;
+      const previous = candidates.get(id);
+      const existing = labels.get(id);
+      // Keep the same island/territory while it is still in view.
+      if (!previous || part === existing?.part || (previous.part !== existing?.part && part.area > previous.part.area)) {
+        candidates.set(id, { part, shift });
+      }
+    }
     const occupied: { x: number; y: number; width: number }[] = [];
     const size = map.getSize();
     const targetId = this.country?.properties.id;
-    const ranked = [...candidates.values()].sort((a, b) => Number(b.part.country.properties.id === targetId) - Number(a.part.country.properties.id === targetId) || b.part.area - a.part.area);
+    const ranked = [...candidates.values()].sort((a, b) =>
+      Number(b.part.country.properties.id === targetId) - Number(a.part.country.properties.id === targetId)
+      || Number(labels.get(b.part.country.properties.id)?.visible ?? false) - Number(labels.get(a.part.country.properties.id)?.visible ?? false)
+      || b.part.area - a.part.area);
+    const shown = new Set<string>();
     for (const { part, shift } of ranked) {
-      part.anchor ??= landPoint(part);
-      let anchor = part.anchor;
-      const visible = L.latLngBounds([bounds.getSouth(), bounds.getWest() - shift], [bounds.getNorth(), bounds.getEast() - shift]);
-      if (!anchor || !visible.contains(anchor)) anchor = landPoint(part, visible);
-      if (!anchor) continue;
-      const position = L.latLng(anchor.lat, anchor.lng + shift);
+      const id = part.country.properties.id;
+      let label = labels.get(id);
+      if (!label || label.part !== part) {
+        part.anchor ??= landPoint(part);
+        const visible = L.latLngBounds([bounds.getSouth(), bounds.getWest() - shift], [bounds.getNorth(), bounds.getEast() - shift]);
+        const anchor = part.anchor && visible.contains(part.anchor) ? part.anchor : landPoint(part, visible);
+        if (!anchor) continue;
+        if (label) {
+          label.part = part;
+          label.anchor = anchor;
+        } else {
+          const span = document.createElement('span');
+          span.textContent = part.country.properties.name;
+          const marker = L.marker([anchor.lat, anchor.lng + shift], {
+            icon: L.divIcon({ className: 'linked-country-label', html: span, iconSize: [0, 0], iconAnchor: [0, 0] }),
+            interactive: false, keyboard: false,
+          }).addTo(map);
+          label = { part, anchor, marker, span, width: Math.min(115, span.textContent.length * 6 + 12), visible: false };
+          labels.set(id, label);
+        }
+      }
+      // The anchor belongs to the label, not to the current clipped viewport.
+      const position = L.latLng(label.anchor.lat, label.anchor.lng + shift);
+      if (!label.marker.getLatLng().equals(position)) label.marker.setLatLng(position);
       const pixel = map.latLngToContainerPoint(position);
-      const name = part.country.properties.name;
-      const width = Math.min(115, name.length * 6 + 12);
-      if (pixel.x < width / 2 + 8 || pixel.y < 18 || pixel.x > size.x - width / 2 - 8 || pixel.y > size.y - 18
-        || occupied.some(other => Math.abs(other.x - pixel.x) < (other.width + width) / 2 && Math.abs(other.y - pixel.y) < 25)) continue;
-      const span = document.createElement('span');
-      span.textContent = name;
-      L.marker(position, {
-        icon: L.divIcon({ className: 'linked-country-label', html: span, iconSize: [0, 0], iconAnchor: [0, 0] }),
-        interactive: false, keyboard: false,
-      }).addTo(labels);
+      const { width } = label;
+      const margin = label.visible ? 0 : 8;
+      if (pixel.x < width / 2 + margin || pixel.y < 10 + margin || pixel.x > size.x - width / 2 - margin || pixel.y > size.y - 10 - margin
+        || occupied.some(other => Math.abs(other.x - pixel.x) < (other.width + width) / 2 + margin && Math.abs(other.y - pixel.y) < 25 + margin)) continue;
+      shown.add(id);
       occupied.push({ x: pixel.x, y: pixel.y, width });
       if (occupied.length === 9) break;
+    }
+    for (const [id, label] of labels) {
+      const visible = shown.has(id);
+      if (label.visible === visible) continue;
+      label.visible = visible;
+      label.span.classList.toggle('is-visible', visible);
+      label.span.setAttribute('aria-hidden', String(!visible));
     }
   }
 }

@@ -151,9 +151,15 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 .leaflet-control-scale-line { color: #c5d1d6; border-color: #81959d; background: #111e29b0; font-size: 10px; text-shadow: none; }
 .linked-country-label { pointer-events: none; }
 .linked-country-label span { display: block; transform: translate(-50%, -50%); width: max-content; max-width: 115px; text-align: center; color: #d1dde0; font: 10px/1.4 ui-monospace, monospace; text-shadow: 0 1px 3px #081720, 1px 0 3px #081720; }
+.linked-country-label span { opacity: 0; transition: opacity 160ms ease-out; }
+.linked-country-label span.is-visible { opacity: 1; }
+@starting-style {
+  .linked-country-label span.is-visible { opacity: 0; }
+}
 .linked-viewport { fill: #d6ed8b; fill-opacity: 0.08; stroke: #d6ed8b; stroke-width: 2; stroke-dasharray: 6 4; vector-effect: non-scaling-stroke; }
 @media (prefers-reduced-motion: reduce) {
   .leaflet-zoom-anim .leaflet-zoom-animated { transition: none; }
+  .linked-country-label span { transition: none; }
 }
 @media (max-width: 1000px), (max-height: 700px) {
   .has-linked-maps .session-panel { top: auto; bottom: 24px; left: 16px; right: 16px; width: auto; max-height: 38dvh; padding: 16px; border: 1px solid #63777f66; border-radius: 16px; background: #14242ef5; }
