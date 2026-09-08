@@ -1,6 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { answerWorldPoint } from './map-interaction';
 
+// Keep frozen review dates independent of Leaflet's wall-clock animations.
+test.use({ reducedMotion: 'reduce' });
+
 async function openFacetSetup(page: Page) {
   await page.getByRole('button', { name: 'Custom practice', exact: true }).click();
   const setup = page.getByRole('dialog', { name: 'Custom practice setup' });

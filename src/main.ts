@@ -6,6 +6,8 @@ import { factVersion, getCountryFacts } from './facts';
 import { Accounts } from './accounts';
 import { createAccountProfile } from './account-profile';
 import { LinkedMaps } from './linked-maps';
+import { MapPin } from './map-pin';
+import { GeographyRenderer } from './geography-renderer';
 import { Globe } from './globe';
 import { createFacetSetup } from './facet-setup';
 import { describeFacets } from './facets';
@@ -14,12 +16,11 @@ const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
   <div id="map" role="region" aria-label="World map"></div>
   <section id="globe" role="region" aria-label="World globe" hidden>
-    <p id="globe-instructions">Drag to rotate · scroll or pinch to zoom · click to select.<br>Keyboard: arrows rotate, +/− zoom, Enter selects the centre.</p>
     <small class="globe-attribution">Natural Earth · Public domain</small>
   </section>
-  <div id="overview-label" class="linked-map-heading" hidden><span>Regional overview</span><small>Click to move the close-up</small></div>
+  <div id="overview-label" class="linked-map-heading" hidden><span>Regional overview</span></div>
   <section id="linked-detail" hidden>
-    <header class="linked-map-heading"><span>Country close-up</span><small id="detail-instructions">Drag or zoom, then click to select</small></header>
+    <header class="linked-map-heading"><span>Country close-up</span></header>
     <div id="detail-map" role="region" aria-label="Country close-up"></div>
   </section>
   <div class="map-shade" aria-hidden="true"></div>
@@ -68,7 +69,6 @@ app.innerHTML = `
       <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> <span id="question-kind">New learning item</span> <span id="question-number"></span></p>
       <p class="prompt">Where is</p>
       <h1><span id="country"></span><span class="accent">?</span></h1>
-      <p class="instructions">Find it. Drop a pin. Trust your bearings.</p>
       <div class="location-tools">
         <button id="location-help" class="secondary" type="button">Show location</button>
         <small id="help-warning">Reveals location · guided practice, not retention</small>
@@ -135,7 +135,7 @@ const questionLabels: Record<'new' | 'review' | 'retry' | 'practice', string> = 
   new: 'New learning item', review: 'Scheduled review', retry: 'Immediate retry', practice: 'Practice revisit',
 };
 let pendingPoint: L.LatLng | null = null;
-let marker: L.CircleMarker | undefined;
+let marker: MapPin | undefined;
 let answerPolygon: L.Polygon | undefined;
 let linkedOpen = session.assisted;
 let globe: Globe | undefined;
@@ -146,6 +146,8 @@ const worldViewButton = document.querySelector<HTMLButtonElement>('#reset-map')!
 const presentationButton = document.querySelector<HTMLButtonElement>('#toggle-presentation')!;
 const zoomInButton = document.querySelector<HTMLButtonElement>('#zoom-in')!;
 const zoomOutButton = document.querySelector<HTMLButtonElement>('#zoom-out')!;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let worldZoomTarget: number | undefined;
 
 function changePresentation(useGlobe: boolean) {
   const selection = pendingPoint;
@@ -181,7 +183,14 @@ presentationButton.addEventListener('click', () => {
 function zoomPresentation(levels: 1 | -1) {
   if (globeOpen) globe?.zoom(levels > 0 ? 0.8 : 1.25);
   else if (app.classList.contains('has-linked-maps')) linkedMaps.zoomBy(levels);
-  else map.setZoom(map.getZoom() + levels);
+  else {
+    const zoom = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), (worldZoomTarget ?? Math.round(map.getZoom())) + levels));
+    worldZoomTarget = zoom;
+    if (!map.getContainer().querySelector('.leaflet-zoom-anim')) {
+      map.setZoom(zoom, { animate: !reducedMotion.matches });
+    }
+    updateZoomControls();
+  }
 }
 
 function updateZoomControls() {
@@ -189,19 +198,55 @@ function updateZoomControls() {
   const target = globeOpen ? ' on globe' : worldMap ? '' : ' on country close-up';
   zoomInButton.setAttribute('aria-label', `Zoom in${target}`);
   zoomOutButton.setAttribute('aria-label', `Zoom out${target}`);
-  zoomInButton.disabled = worldMap && map.getZoom() >= map.getMaxZoom();
-  zoomOutButton.disabled = worldMap && map.getZoom() <= map.getMinZoom();
+  zoomInButton.disabled = worldMap && (worldZoomTarget ?? map.getZoom()) >= map.getMaxZoom();
+  zoomOutButton.disabled = worldMap && (worldZoomTarget ?? map.getZoom()) <= map.getMinZoom();
 }
 
 zoomInButton.addEventListener('click', () => zoomPresentation(1));
 zoomOutButton.addEventListener('click', () => zoomPresentation(-1));
 
 const map = L.map('map', {
-  minZoom: 1, maxZoom: 10, zoomControl: false, zoomAnimation: false,
-  fadeAnimation: false, doubleClickZoom: false,
-  maxBounds: [[-85, -180], [85, 180]], maxBoundsViscosity: 1,
+  minZoom: 1, maxZoom: 10, zoomControl: false, zoomAnimation: !reducedMotion.matches,
+  markerZoomAnimation: !reducedMotion.matches, fadeAnimation: false, doubleClickZoom: false,
+  inertia: !reducedMotion.matches, inertiaMaxSpeed: 900, inertiaDeceleration: 16000,
+  renderer: new GeographyRenderer({ padding: 0.5 }),
 }).setView([15, 0], app.clientWidth <= 700 ? 1 : 2);
-map.on('zoomend', updateZoomControls);
+map.on('zoomend', () => {
+  if (worldZoomTarget !== undefined && map.getZoom() !== worldZoomTarget) {
+    map.setZoom(worldZoomTarget, { animate: !reducedMotion.matches });
+  } else worldZoomTarget = undefined;
+  updateZoomControls();
+});
+map.on('dragstart', () => { worldZoomTarget = undefined; });
+for (const event of ['pointerdown', 'wheel', 'keydown']) {
+  map.getContainer().addEventListener(event, () => {
+    worldZoomTarget = undefined;
+    if (event === 'keydown') stopWorldMovement();
+  }, { passive: true });
+}
+reducedMotion.addEventListener('change', () => {
+  map.options.inertia = !reducedMotion.matches;
+  if (reducedMotion.matches) stopWorldMovement();
+});
+
+function stopWorldMovement() {
+  worldZoomTarget = undefined;
+  // Leaflet's public stop() stops pan/fly, but not its CSS zoom transition.
+  if (map.getContainer().querySelector('.leaflet-zoom-anim')) {
+    (map as L.Map & { _onZoomTransitionEnd(): void })._onZoomTransitionEnd();
+  }
+  const zoomSnap = map.options.zoomSnap;
+  map.options.zoomSnap = 0;
+  map.setView(map.getCenter(), map.getZoom(), { animate: false });
+  map.options.zoomSnap = zoomSnap;
+}
+
+function resetWorld(animate = true) {
+  stopWorldMovement();
+  map.flyTo([15, 0], app.clientWidth <= 700 ? 1 : 2, {
+    animate: animate && !globeOpen && !reducedMotion.matches,
+  });
+}
 // Anchor the mobile reset action to the visible map, above its attribution or question card.
 const worldViewPosition = new ResizeObserver(() => {
   if (app.clientWidth > 700) return;
@@ -218,49 +263,68 @@ worldViewPosition.observe(map.getContainer());
 worldViewPosition.observe(globeContainer);
 worldViewPosition.observe(detailMapContainer);
 map.attributionControl.addAttribution('Natural Earth · Public domain');
-const boundaries = L.geoJSON(countries, {
-  style: { color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1 },
-}).addTo(map);
+// Keep the same coastline through CSS zooms and the final reprojection.
+const boundaryStyle: L.PolylineOptions = { smoothFactor: 0, color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1 };
+const boundaries = L.geoJSON(countries, { style: boundaryStyle }).addTo(map);
 const linkedMaps = new LinkedMaps(map, detailMapContainer, selectPoint);
 
-// A projected square grid stays aligned with the map while extending beyond
-// geographic bounds to fill the entire canvas, including portrait viewports.
+// Keep the infinite projected grid in Leaflet's pane so pan and zoom move it
+// with the geography, including CSS zooms that do not emit per-frame move events.
 const grid = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-grid.classList.add('map-grid');
+grid.classList.add('map-grid', 'leaflet-zoom-animated');
 grid.setAttribute('aria-hidden', 'true');
 const gridLines = document.createElementNS('http://www.w3.org/2000/svg', 'path');
 grid.append(gridLines);
-map.getContainer().append(grid);
+map.getPane('tilePane')!.append(grid);
+let gridCenter = map.getCenter();
+let gridZoom = map.getZoom();
+let gridPixelOrigin = map.getPixelOrigin();
 function drawGrid() {
   const size = map.getSize();
-  const bounds = map.getBounds();
+  const origin = map.containerPointToLayerPoint(size.multiplyBy(-1)).round();
+  const extent = size.multiplyBy(3);
+  gridCenter = map.getCenter();
+  gridZoom = map.getZoom();
+  gridPixelOrigin = map.getPixelOrigin();
+  const spacing = L.CRS.EPSG3857.scale(gridZoom) / 12;
+  const equator = map.latLngToLayerPoint([0, 0]);
   const segments: string[] = [];
-  for (let longitude = Math.floor(bounds.getWest() / 30) * 30; longitude <= bounds.getEast(); longitude += 30) {
-    segments.push(`M${map.latLngToContainerPoint([0, longitude]).x} 0V${size.y}`);
+  for (let x = equator.x + Math.floor((origin.x - equator.x) / spacing) * spacing; x <= origin.x + extent.x; x += spacing) {
+    segments.push(`M${x} ${origin.y}V${origin.y + extent.y}`);
   }
-  const spacing = L.CRS.EPSG3857.scale(map.getZoom()) / 12;
-  const equator = map.latLngToContainerPoint([0, 0]).y;
-  for (let y = ((equator % spacing) + spacing) % spacing; y <= size.y; y += spacing) {
-    segments.push(`M0 ${Math.round(y)}H${size.x}`);
+  for (let y = equator.y + Math.floor((origin.y - equator.y) / spacing) * spacing; y <= origin.y + extent.y; y += spacing) {
+    segments.push(`M${origin.x} ${y}H${origin.x + extent.x}`);
   }
-  grid.setAttribute('viewBox', `0 0 ${size.x} ${size.y}`);
+  grid.setAttribute('width', String(extent.x));
+  grid.setAttribute('height', String(extent.y));
+  grid.setAttribute('viewBox', `${origin.x} ${origin.y} ${extent.x} ${extent.y}`);
+  L.DomUtil.setTransform(grid as unknown as HTMLElement, origin);
   gridLines.setAttribute('d', segments.join(''));
 }
+map.on('zoomanim', (event: L.ZoomAnimEvent) => {
+  const size = map.getSize();
+  const scale = map.getZoomScale(event.zoom, gridZoom);
+  const panePosition = map.containerPointToLayerPoint([0, 0]).multiplyBy(-1);
+  const pixelOrigin = map.project(event.center, event.zoom).subtract(size.divideBy(2)).add(panePosition).round();
+  const offset = size.multiplyBy(-1.5 * scale).add(map.project(gridCenter, event.zoom)).subtract(pixelOrigin);
+  L.DomUtil.setTransform(grid as unknown as HTMLElement, offset, scale);
+});
 map.on('move zoom resize', drawGrid);
 drawGrid();
 
-function focusAnswer() {
-  if (!answerPolygon || linkedOpen) return;
+function focusAnswer(animate = true) {
+  if (!answerPolygon || linkedOpen || globeOpen) return;
   const canvas = map.getContainer().getBoundingClientRect();
   const overlay = panel.getBoundingClientRect();
   const top = Math.max(header.getBoundingClientRect().bottom, progress.getBoundingClientRect().bottom) - canvas.top + 24;
-  map.fitBounds(answerPolygon.getBounds(), {
+  stopWorldMovement();
+  map.flyToBounds(answerPolygon.getBounds(), {
     paddingTopLeft: [canvas.width <= 700 ? 24 : overlay.right - canvas.left + 32, top],
     paddingBottomRight: [24, canvas.width <= 700 ? canvas.bottom - overlay.top + 24 : 32],
-    maxZoom: 6, animate: false,
+    maxZoom: 6, animate: animate && !reducedMotion.matches,
   });
 }
-map.on('resize', focusAnswer);
+map.on('resize', () => focusAnswer(false));
 
 const populationFormatter = new Intl.NumberFormat('en');
 
@@ -320,7 +384,9 @@ function renderFactCard(countryId: string, version: string) {
   factCard.scrollTop = 0;
 }
 
-function renderQuestion() {
+function renderQuestion(animate = true) {
+  stopWorldMovement();
+  answerPolygon = undefined;
   const reading = session.readingFacts;
   app.classList.toggle('is-reading', reading);
   const selectedFacets = session.selection;
@@ -338,17 +404,13 @@ function renderQuestion() {
   presentationButton.dataset.presentation = globeOpen ? 'globe' : 'map';
   presentationButton.setAttribute('aria-label', presentationButton.disabled ? '3D globe unavailable' : globeOpen ? 'Switch to 2D map' : 'Switch to 3D globe');
   globe?.setVisible(globeOpen);
-  globe?.showAnswer(answer || reading ? country ?? undefined : undefined, answer ?? undefined);
   const showLinked = session.started && !!country && linkedOpen && !reading;
   app.classList.toggle('has-linked-maps', showLinked);
   updateZoomControls();
   document.querySelector<HTMLElement>('#linked-detail')!.hidden = !showLinked;
   document.querySelector<HTMLElement>('#overview-label')!.hidden = !showLinked;
   map.getContainer().setAttribute('aria-label', showLinked ? 'Regional overview' : 'World map');
-  if (!showLinked) {
-    linkedMaps.hide();
-    map.invalidateSize({ pan: false });
-  }
+  if (!showLinked) linkedMaps.hide();
   document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
   document.querySelector('#country')!.textContent = country?.properties.name ?? '';
   document.querySelector('#question-kind')!.textContent = reading ? 'Country fact cards' : session.questionKind ? questionLabels[session.questionKind] : '';
@@ -365,13 +427,11 @@ function renderQuestion() {
   document.querySelector<HTMLElement>('#linked-actions')!.hidden = !showLinked;
   document.querySelector<HTMLElement>('#help-warning')!.hidden = !!answer || showLinked || session.assisted;
   document.querySelector<HTMLElement>('#guided-note')!.hidden = !session.assisted;
-  document.querySelector('#detail-instructions')!.textContent = answer ? 'Answer recorded · drag or zoom to explore' : 'Drag or zoom, then click to select';
   storageNotice.textContent = session.storageNotice;
   storageNotice.hidden = !session.storageNotice;
   boundaries.resetStyle();
   marker?.remove();
   marker = undefined;
-  answerPolygon = undefined;
   pendingPoint = null;
   panel.classList.toggle('is-answered', !!answer || reading);
   factCard.hidden = true;
@@ -390,54 +450,46 @@ function renderQuestion() {
     reviewAt.dateTime = itemProficiency.dueAt;
     reviewAt.textContent = dateFormatter.format(new Date(itemProficiency.dueAt));
   }
-  if (!country) {
-    map.setView([15, 0], app.clientWidth <= 700 ? 1 : 2, { animate: false });
-    return;
-  }
   feedback.className = 'selection-hint';
-  if (reading) {
+  if (country && reading) {
     feedback.textContent = 'Reading does not change proficiency or review dates. Locations shown here count as help for unanswered questions.';
     renderFactCard(country.properties.id, factVersion);
+  } else if (!answer) {
+    feedback.textContent = '';
+  } else if (country) {
+    feedback.className = `feedback ${answer.correct ? 'correct' : 'incorrect'}`;
+    renderFactCard(country.properties.id, answer.factVersion);
+    const result = document.createElement('strong');
+    result.textContent = answer.assisted
+      ? answer.correct ? 'Correct — guided practice.' : 'Not quite — guided practice.'
+      : answer.correct ? 'Correct — well placed.' : 'Not quite — take another look.';
+    const explanation = document.createElement('span');
+    explanation.textContent = `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${answer.correct
+      ? 'Your selection is within the accepted geographic tolerance.'
+      : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
+    feedback.replaceChildren(result, explanation);
+    // Siachen Glacier is a disputed geographic area without its own country flag.
+    if (country.properties.id !== 'KAS') {
+      const flag = document.createElement('img');
+      flag.className = 'country-flag';
+      flag.src = new URL(`./flags/${country.properties.id}.svg`, document.baseURI).href;
+      flag.alt = `Flag of ${country.properties.name}`;
+      flag.width = 64;
+      flag.height = 48;
+      feedback.prepend(flag);
+    }
+  }
+  // Finish the panel and surface layout before measuring a destination or
+  // starting travel. invalidateSize must not refocus the previous answer.
+  if (!showLinked) map.invalidateSize({ pan: false, animate: false });
+  globe?.showAnswer(answer || reading ? country ?? undefined : undefined, answer ?? undefined);
+  if (showLinked && country) {
+    linkedMaps.show(country, answer ?? undefined);
+  } else if (country && (answer || reading)) {
     highlightCountry(country.properties.id);
-    if (!globeOpen) focusAnswer();
-    return;
-  }
-  if (!answer) {
-    feedback.textContent = showLinked ? 'Select your location in the country close-up.' : globeOpen ? 'Rotate the globe, then click to place your pin.' : 'Tap the map to place your pin.';
-    if (showLinked) linkedMaps.show(country);
-    else map.setView([15, 0], app.clientWidth <= 700 ? 1 : 2, { animate: false });
-    return;
-  }
-  feedback.className = `feedback ${answer.correct ? 'correct' : 'incorrect'}`;
-  renderFactCard(country.properties.id, answer.factVersion);
-  const result = document.createElement('strong');
-  result.textContent = answer.assisted
-    ? answer.correct ? 'Correct — guided practice.' : 'Not quite — guided practice.'
-    : answer.correct ? 'Correct — well placed.' : 'Not quite — take another look.';
-  const explanation = document.createElement('span');
-  explanation.textContent = `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${answer.correct
-    ? 'Your selection is within the accepted geographic tolerance.'
-    : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
-  feedback.replaceChildren(result, explanation);
-  // Siachen Glacier is a disputed geographic area without its own country flag.
-  if (country.properties.id !== 'KAS') {
-    const flag = document.createElement('img');
-    flag.className = 'country-flag';
-    flag.src = new URL(`./flags/${country.properties.id}.svg`, document.baseURI).href;
-    flag.alt = `Flag of ${country.properties.name}`;
-    flag.width = 64;
-    flag.height = 48;
-    feedback.prepend(flag);
-  }
-  if (showLinked) {
-    linkedMaps.show(country, answer);
-    return;
-  }
-  highlightCountry(answer.countryId);
-  marker = L.circleMarker([answer.latitude, answer.longitude], {
-    radius: 7, weight: 3, color: '#111f2c', fillColor: answer.correct ? '#d6ef87' : '#ea947b', fillOpacity: 1, interactive: false,
-  }).addTo(map);
-  if (!globeOpen) focusAnswer();
+    if (answer) marker = new MapPin(map, [answer.latitude, answer.longitude], answer.correct);
+    if (!globeOpen) focusAnswer(animate);
+  } else resetWorld(animate);
 }
 
 function highlightCountry(countryId: string) {
@@ -455,14 +507,22 @@ function selectPoint(point: L.LatLng) {
   pendingPoint = point;
   globe?.setSelection({ longitude: point.lng, latitude: point.lat });
   if (!linkedOpen && !globeOpen) {
-    if (marker) marker.setLatLng(point);
-    else marker = L.circleMarker(point, { radius: 7, weight: 3, color: '#111f2c', fillColor: '#d6ef87', fillOpacity: 1, interactive: false }).addTo(map);
+    const projection = map.getContainer().querySelector('.leaflet-zoom-anim') ? { zoom: gridZoom, origin: gridPixelOrigin } : undefined;
+    if (marker) marker.place(point, undefined, projection);
+    else marker = new MapPin(map, point, undefined, projection);
   }
   feedback.textContent = `${Math.abs(point.lat).toFixed(1)}° ${point.lat >= 0 ? 'N' : 'S'} / ${Math.abs(point.lng).toFixed(1)}° ${point.lng >= 0 ? 'E' : 'W'}`;
   check.disabled = false;
 }
 map.on('click', (event: L.LeafletMouseEvent) => {
-  if (!linkedOpen) selectPoint(event.latlng);
+  if (linkedOpen) return;
+  // Leaflet commits the target projection before its CSS zoom is visible.
+  // Invert the grid's actual transform to select the point under the pointer.
+  const matrix = grid.getScreenCTM();
+  if (matrix && map.getContainer().querySelector('.leaflet-zoom-anim')) {
+    const point = new DOMPoint(event.originalEvent.clientX, event.originalEvent.clientY).matrixTransform(matrix.inverse());
+    selectPoint(map.unproject(L.point(point.x, point.y).add(gridPixelOrigin), gridZoom));
+  } else selectPoint(event.latlng);
 });
 document.querySelector('#start')!.addEventListener('click', () => {
   session.start();
@@ -501,7 +561,7 @@ document.querySelector('#reset-map')!.addEventListener('click', () => {
   } else if (globeOpen) {
     globe?.reset();
   } else {
-    map.setView([15, 0], app.clientWidth <= 700 ? 1 : 2, { animate: false });
+    resetWorld();
   }
 });
 document.querySelector('#open-profile')!.addEventListener('click', () => {
@@ -563,4 +623,4 @@ accounts.onchange = sessionChanged => {
   renderAccountProfile();
 };
 window.addEventListener('online', () => { void accounts.sync(); });
-renderQuestion();
+renderQuestion(false);

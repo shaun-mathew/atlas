@@ -5,6 +5,10 @@ import { join } from 'node:path';
 import countryData from '../src/data/countries.json' with { type: 'json' };
 import { answerWorldPoint, selectWorldPoint } from './map-interaction';
 
+// These learning tests freeze Date.now(); Leaflet's wall-clock transitions
+// cannot advance. Real movement is exercised in map-navigation.spec.ts.
+test.use({ reducedMotion: 'reduce' });
+
 async function seedQuestion(page: Page, countryId: string) {
   await page.addInitScript(id => {
     if (localStorage.getItem('atlas-practice.guest') !== null) return;

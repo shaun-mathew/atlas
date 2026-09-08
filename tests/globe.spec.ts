@@ -5,6 +5,8 @@ test.describe.configure({ mode: 'serial' });
 // Project a known geographic fixture into the rendered perspective view.
 // No renderer internals or application selection hooks are used.
 async function clickGlobePoint(page: Page, longitude: number, latitude: number, center = { longitude: 0, latitude: 15, distance: 3 }) {
+  // Geographic fixtures are projected into the settled view, not mid-transition.
+  await page.waitForTimeout(1500);
   const box = (await page.getByRole('application', { name: 'Interactive globe' }).boundingBox())!;
   const radians = Math.PI / 180;
   const delta = (longitude - center.longitude) * radians;
@@ -17,6 +19,8 @@ async function clickGlobePoint(page: Page, longitude: number, latitude: number, 
   await page.mouse.click(box.x + box.width / 2 + x * scale / depth, box.y + box.height / 2 - y * scale / depth);
 }
 test('rotating and zooming the globe preserves a country answer across presentations', async ({ page }) => {
+  // This persistence scenario freezes review dates; animation has separate coverage.
+  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
@@ -34,6 +38,7 @@ test('rotating and zooming the globe preserves a country answer across presentat
   await globe.press('ArrowLeft');
   await globe.press('ArrowDown');
   await globe.press('ArrowDown');
+  await page.waitForTimeout(450);
   await globe.press('Enter');
   await expect(page.getByRole('status')).toContainText('15.0° S / 60.0° W');
   await page.getByRole('button', { name: 'Zoom in on globe' }).click();
@@ -59,6 +64,7 @@ test('rotating and zooming the globe preserves a country answer across presentat
   await page.getByRole('button', { name: 'Next learning item' }).click();
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
+  await page.waitForTimeout(450);
   const map = (await page.getByRole('region', { name: 'World map', exact: true }).boundingBox())!;
   const mercatorY = (latitude: number) => (1 - Math.asinh(Math.tan(latitude * Math.PI / 180)) / Math.PI) * 512;
   await page.mouse.click(map.x + 128 / 360 * 1024 - Math.round(512 - map.width / 2), map.y + mercatorY(-12) - Math.round(mercatorY(15) - map.height / 2));
