@@ -496,7 +496,7 @@ function highlightCountry(countryId: string) {
   boundaries.eachLayer(layer => {
     const polygon = layer as L.Polygon & { feature: Country };
     if (polygon.feature.properties.id !== countryId) return;
-    polygon.setStyle({ color: '#e3f5b1', weight: 2, fillColor: '#a2c472' });
+    polygon.setStyle({ color: '#e3f5b1', fillColor: '#a2c472' });
     polygon.bringToFront();
     answerPolygon = polygon;
   });

@@ -312,11 +312,11 @@ export class Globe {
       context.moveTo(0, y); context.lineTo(canvas.width, y);
     }
     context.stroke();
+    context.lineWidth = 1.5;
     for (const country of countries) {
       const highlighted = country === this.highlighted;
       context.fillStyle = highlighted ? '#a2c472' : '#334c57';
       context.strokeStyle = highlighted ? '#e3f5b1' : '#63777f';
-      context.lineWidth = highlighted ? 3 : 1.5;
       const polygons = country.geometry.type === 'Polygon' ? [country.geometry.coordinates] : country.geometry.coordinates;
       for (const polygon of polygons) {
         context.beginPath();
