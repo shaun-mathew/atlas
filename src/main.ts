@@ -3,7 +3,8 @@ import 'leaflet/dist/leaflet.css';
 import './style.css';
 import { countries, type Country } from './geography';
 import { factVersion, getCountryFacts } from './facts';
-import { GuestSession } from './session';
+import { Accounts } from './accounts';
+import { createAccountProfile } from './account-profile';
 import { LinkedMaps } from './linked-maps';
 import { Globe } from './globe';
 import { createFacetSetup } from './facet-setup';
@@ -96,13 +97,13 @@ app.innerHTML = `
   <dialog id="profile-dialog" class="app-dialog" aria-labelledby="profile-title">
     <button id="close-profile" class="secondary dialog-close" type="button">Close</button>
     <h2 id="profile-title">Your profile</h2>
-    <h3>Guest profile</h3>
-    <p>Not signed in. This app currently keeps your learning progress in this browser; no account is connected.</p>
+    <h3 id="profile-identity">Guest profile</h3>
+    <p id="profile-description">Not signed in. Your progress stays in this browser.</p>
     <p id="profile-progress"></p>
     <button id="request-reset" class="secondary danger" type="button">Reset learning progress</button>
     <section id="reset-confirmation" aria-labelledby="reset-title" hidden>
       <h3 id="reset-title">Reset learning progress?</h3>
-      <p>This permanently deletes your answers, proficiency, and scheduled reviews in this browser. It cannot be undone.</p>
+      <p id="reset-description">This permanently deletes your answers, proficiency, and scheduled reviews in this browser. It cannot be undone.</p>
       <div class="profile-actions">
         <button id="cancel-reset" class="secondary" type="button">Cancel</button>
         <button id="confirm-reset" class="primary danger" type="button">Reset progress</button>
@@ -111,7 +112,9 @@ app.innerHTML = `
     <p id="profile-reset-error" role="alert" hidden></p>
   </dialog>`;
 
-const session = new GuestSession();
+const accounts = new Accounts();
+await accounts.initialize();
+let session = accounts.session;
 const panel = document.querySelector<HTMLDivElement>('.session-panel')!;
 const header = document.querySelector<HTMLElement>('.app-header')!;
 const progress = document.querySelector<HTMLParagraphElement>('#progress')!;
@@ -502,7 +505,7 @@ document.querySelector('#reset-map')!.addEventListener('click', () => {
   }
 });
 document.querySelector('#open-profile')!.addEventListener('click', () => {
-  document.querySelector('#profile-progress')!.textContent = `${session.attempts.length} answers in this guest profile.`;
+  renderAccountProfile();
   resetConfirmation.hidden = true;
   resetRequest.hidden = false;
   profileResetError.hidden = true;
@@ -521,16 +524,21 @@ document.querySelector('#cancel-reset')!.addEventListener('click', () => {
   profileResetError.hidden = true;
   resetRequest.focus();
 });
-document.querySelector('#confirm-reset')!.addEventListener('click', () => {
-  if (!session.reset()) {
-    profileResetError.textContent = session.storageNotice;
+document.querySelector('#confirm-reset')!.addEventListener('click', async () => {
+  const confirm = document.querySelector<HTMLButtonElement>('#confirm-reset')!;
+  confirm.disabled = true;
+  try {
+    if (!await accounts.resetProgress()) throw new Error(session.storageNotice);
+    profile.close();
+    linkedOpen = false;
+    renderQuestion();
+    document.querySelector<HTMLButtonElement>('#start')!.focus();
+  } catch (error) {
+    profileResetError.textContent = error instanceof Error ? error.message : 'Learning progress could not be reset. Your progress has been kept.';
     profileResetError.hidden = false;
-    return;
+  } finally {
+    confirm.disabled = false;
   }
-  profile.close();
-  linkedOpen = false;
-  renderQuestion();
-  document.querySelector<HTMLButtonElement>('#start')!.focus();
 });
 const facetSetup = createFacetSetup(selection => {
   session.choosePractice(selection);
@@ -545,4 +553,14 @@ document.querySelector('#adaptive-mode')!.addEventListener('click', () => {
   linkedOpen = session.assisted;
   renderQuestion();
 });
+const renderAccountProfile = createAccountProfile(accounts);
+accounts.onchange = sessionChanged => {
+  if (sessionChanged) {
+    session = accounts.session;
+    linkedOpen = session.assisted;
+    renderQuestion();
+  }
+  renderAccountProfile();
+};
+window.addEventListener('online', () => { void accounts.sync(); });
 renderQuestion();

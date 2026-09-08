@@ -1,5 +1,5 @@
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
-import data from './data/countries.json';
+import data from './data/countries.json' with { type: 'json' };
 
 export type Country = Feature<Polygon | MultiPolygon, { id: string; name: string; region: string }>;
 

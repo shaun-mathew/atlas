@@ -17,7 +17,7 @@ function geographic(point: THREE.Vector3): Point {
 }
 
 // Only geographic coordinates cross this presentation boundary. Evaluation,
-// learning-item identity, assistance, and scheduling remain in GuestSession.
+// learning-item identity, assistance, and scheduling remain in LearnerSession.
 export class Globe {
   private readonly renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   private readonly scene = new THREE.Scene();

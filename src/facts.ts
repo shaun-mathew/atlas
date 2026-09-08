@@ -1,4 +1,4 @@
-import data from './data/country-facts-2026-09-07.json';
+import data from './data/country-facts-2026-09-07.json' with { type: 'json' };
 
 export interface CountryFacts {
   name: string;

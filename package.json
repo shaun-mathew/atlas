@@ -3,18 +3,22 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=24.15.0" },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",
-    "preview": "vite preview --host 127.0.0.1",
+    "preview": "npm run start",
     "test": "playwright test"
   },
   "dependencies": {
     "@turf/boolean-point-in-polygon": "^7.3.4",
     "@turf/point-to-polygon-distance": "^7.3.4",
+    "better-auth": "^1.7.3",
     "leaflet": "^1.9.4",
     "three": "^0.185.1",
+    "tsx": "^4.23.13",
     "zod": "^4.0.0"
   },
   "devDependencies": {
