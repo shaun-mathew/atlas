@@ -1,0 +1,24 @@
+# Allow only build inputs; exclude .git (including worktree pointers), host
+# node_modules/dist, test reports, documentation, and local configuration.
+**
+!Dockerfile
+!.dockerignore
+!package.json
+!package-lock.json
+!index.html
+!tsconfig.json
+!playwright.config.ts
+!vite.config.ts
+!server/
+!server/**
+!src/
+!src/**
+!public/
+!public/**
+!tests/
+!tests/**
+
+# Never send local secrets, even if placed beneath an included directory.
+**/.env*
+**/*.pem
+**/*.key

@@ -1,0 +1,44 @@
+# Requires Docker Engine/Desktop with Docker Compose v2+ and Buildx.
+# Run from this directory; no host Node.js installation is needed.
+# Start:   docker compose up --build -d --wait
+# Open:    http://localhost:8080 (use this exact origin for account requests)
+# Port:    PORT=3000 docker compose up --build -d --wait
+# Inspect: docker compose ps; docker compose logs -f web
+# Update:  fetch/check out the desired revision, then run:
+#          docker compose build --pull && docker compose up -d --wait
+# Stop:    docker compose down (retains accounts and progress)
+#
+# Put PORT, APP_ORIGIN, and BIND_ADDRESS overrides in a local .env file.
+# Create the first account locally before public exposure: it becomes admin.
+# Published HTTP binds to loopback by default. For public access use an HTTPS
+# reverse proxy and set APP_ORIGIN=https://atlas.example.com. Preserve the Host
+# and Origin headers. Set BIND_ADDRESS=0.0.0.0 only if remote access to this port
+# is needed. Serve at the domain root, not under a URL subpath.
+#
+# The accounts volume stores SQLite, its journal files, and the automatically
+# generated signing-secret sidecar. Back up the entire volume while the service
+# is stopped; restore those files together. Never use `down -v` unless deliberately
+# deleting all accounts and synchronized progress. No mail service is required;
+# password recovery is an administrator reset. Guest-only progress remains in
+# browser localStorage and is tied to its scheme/host/port, not this volume.
+services:
+  web:
+    build: .
+    environment:
+      APP_ORIGIN: "${APP_ORIGIN:-http://localhost:${PORT:-8080}}"
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - accounts:/app/data
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # The image healthcheck probes both application HTML and the account API.
+volumes:
+  accounts:
