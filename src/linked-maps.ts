@@ -12,7 +12,7 @@ type Label = { part: LandMass; anchor: L.LatLng; marker: L.Marker; span: HTMLSpa
 type Labels = Map<string, Label>;
 // Simplifying again at each zoom changes the coastline after the CSS animation.
 const boundaryStyle: L.PolylineOptions = { smoothFactor: 0, color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1, interactive: false };
-const targetStyle: L.PolylineOptions = { smoothFactor: 0, color: '#e3f5b1', weight: boundaryStyle.weight, fillColor: '#a2c472', fillOpacity: 0.85, interactive: false, className: 'linked-target' };
+const targetStyle: L.PolylineOptions = { smoothFactor: 0, color: '#e3f5b1', weight: 2, fillColor: '#a2c472', fillOpacity: 0.85, interactive: false, className: 'linked-target' };
 const frames = new Map<string, Frame>();
 let landMasses: LandMass[] | undefined;
 

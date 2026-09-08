@@ -11,6 +11,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .fact-card:focus-v
 #map { position: absolute; inset: 0; z-index: 0; background: #111e29; cursor: crosshair; }
 .map-grid { position: absolute; pointer-events: none; }
 .map-grid path { fill: none; stroke: #66869a; stroke-width: 1; vector-effect: non-scaling-stroke; opacity: 0.22; }
+.answer-border, .linked-target { stroke-width: calc(var(--geography-stroke-width) * var(--geography-stroke-scale, 1)); }
 .map-selection-pin { border: 3px solid #111f2c; border-radius: 50%; pointer-events: none; }
 .leaflet-zoom-anim .map-selection-pin.is-tracking-zoom { transition: none; }
 .map-shade { position: absolute; inset: 0; z-index: 1; pointer-events: none; background: linear-gradient(90deg, #101c29e8 0%, #101c2970 27%, transparent 52%), linear-gradient(180deg, #0b15216b, transparent 22%, transparent 78%, #0b152145); }
