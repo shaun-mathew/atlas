@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { answerWorldPoint } from './map-interaction';
 
+test.use({ reducedMotion: 'reduce' });
+
 test('guest upgrades without email and resumes learning on another device', async ({ page, browser }) => {
   const username = `learner-${crypto.randomUUID().slice(0, 20)}`;
   await page.goto('/');
@@ -41,7 +43,7 @@ test('guest upgrades without email and resumes learning on another device', asyn
   }
 });
 
-test('attaching guest history preserves versioned proficiency and continues adaptive reviews', async ({ page, request }) => {
+test('attaching guest history preserves versioned proficiency and continues adaptive reviews', async ({ page, request, baseURL }) => {
   await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
   const username = `merged-${crypto.randomUUID().slice(0, 20)}`;
   const first = {
@@ -51,7 +53,7 @@ test('attaching guest history preserves versioned proficiency and continues adap
     selectedCountry: 'Brazil', answeredAt: '2026-09-06T12:00:00.000Z',
   };
   const registered = await request.post('/api/register', {
-    headers: { Origin: 'http://127.0.0.1:5173' },
+    headers: { Origin: baseURL! },
     data: {
       username, password: 'a sufficiently long password',
       progress: { version: 6, started: true, current: null, cursor: 1, attempts: [first] },
