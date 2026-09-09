@@ -1,5 +1,5 @@
 import { countries } from './geography';
-import { continentRegions, defaultFacets, describeFacets, matchesFacets, type FacetSelection } from './facets';
+import { continentRegions, contextLabels, defaultFacets, describeFacets, matchesFacets, type FacetSelection } from './facets';
 import './facet-setup.css';
 
 export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
@@ -37,8 +37,13 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
             <p class="facet-description">Practice a spatial skill, or slow down with country facts.</p>
             <fieldset class="facet-learning"><legend class="facet-note">Available learning options</legend>
               <label class="facet-choice"><input type="radio" name="learning" value="name-to-location" aria-label="Name-to-location" checked><span><strong>Name-to-location</strong><small>Find a named country on the map or globe.</small></span></label>
+              <label class="facet-choice"><input type="radio" name="learning" value="shape-recognition" aria-label="Shape recognition"><span><strong>Shape recognition</strong><small>Identify a highlighted country or silhouette. A separate skill and review schedule.</small></span></label>
               <label class="facet-choice"><input type="radio" name="learning" value="country-facts" aria-label="Country fact cards"><span><strong>Country fact cards</strong><small>Read sourced facts. Reading is not scored and does not reschedule reviews.</small></span></label>
             </fieldset>
+            <label class="facet-geography" id="shape-context-choice" hidden>Starting context
+              <select name="startingContext">${Object.entries(contextLabels).map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select>
+            </label>
+            <p class="facet-note" id="shape-context-note" hidden>New shape items start here. Scheduled successes reduce clues; repeated misses restore context. Existing items keep their learning history.</p>
           </section>
         </div>
         <footer class="facet-wizard-actions">
@@ -85,6 +90,8 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
     next.hidden = step === 3;
     start.hidden = step !== 3;
     start.firstChild!.textContent = draft.learning === 'country-facts' ? 'Start reading ' : 'Start practice ';
+    dialog.querySelector<HTMLElement>('#shape-context-choice')!.hidden = draft.learning !== 'shape-recognition';
+    dialog.querySelector<HTMLElement>('#shape-context-note')!.hidden = draft.learning !== 'shape-recognition';
     if (focusHeading) dialog.querySelector<HTMLElement>(`[data-page="${step}"] h2`)!.focus();
   }
   dialog.addEventListener('change', event => {
@@ -96,6 +103,7 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
     }
     if (input.name === 'region') draft.region = region.value;
     if (input.name === 'learning') draft.learning = input.value as FacetSelection['learning'];
+    if (input.name === 'startingContext') draft.startingContext = input.value as FacetSelection['startingContext'];
     render();
   });
   dialog.addEventListener('click', event => {
@@ -115,6 +123,7 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
       continent.value = draft.continent;
       renderRegions();
       dialog.querySelector<HTMLInputElement>(`[name="learning"][value="${draft.learning}"]`)!.checked = true;
+      dialog.querySelector<HTMLSelectElement>('[name="startingContext"]')!.value = draft.startingContext ?? 'rich';
       render();
       dialog.showModal();
     },

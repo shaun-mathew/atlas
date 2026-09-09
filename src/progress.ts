@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { countries, introductionOrder } from './geography';
-import { facetSelectionSchema, matchesFacets } from './facets';
+import { difficultyContexts, difficultyContextSchema, facetSelectionSchema, matchesFacets } from './facets';
 
 export const boundaryVersion = 'natural-earth-5.1.2-50m';
 const firstFactVersion = '2026-09-07';
@@ -10,6 +10,8 @@ const previousKindSchema = questionKindSchema.or(z.literal('diagnostic'))
   .transform(kind => kind === 'diagnostic' ? 'new' as const : kind);
 const questionSchema = z.object({
   countryId: countryIdSchema,
+  skill: z.enum(['name-to-location', 'shape-recognition']).optional(),
+  difficultyContext: difficultyContextSchema.optional(),
   kind: questionKindSchema,
   assisted: z.boolean().default(false),
 });
@@ -20,8 +22,10 @@ const attemptSchema = z.object({
   boundaryVersion: z.string().min(1).max(128),
   // The first fact release also describes attempts made before fact cards existed.
   factVersion: z.string().min(1).max(128).default(firstFactVersion),
-  longitude: z.number().min(-180).max(180),
-  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180).optional(),
+  latitude: z.number().min(-90).max(90).optional(),
+  selectedCountryId: countryIdSchema.optional(),
+  difficultyContext: difficultyContextSchema.optional(),
   correct: z.boolean(),
   assisted: z.boolean().default(false),
   selectedCountry: z.string().max(256).nullable(),
@@ -41,7 +45,11 @@ const normalizedProgressSchema = z.object({
 
 export type Progress = z.infer<typeof normalizedProgressSchema>;
 export type Attempt = Progress['attempts'][number];
-type Question = NonNullable<Progress['current']>;
+export type Question = NonNullable<Progress['current']>;
+
+export function learningItemKey(item: { countryId: string; skill?: string }): string {
+  return `${item.countryId}:${item.skill ?? 'name-to-location'}`;
+}
 
 export class ProgressConflictError extends Error {
   constructor(id: string) {
@@ -78,9 +86,9 @@ const legacyProgressSchema = z.object({
   ...initialProgress(), ...state, version: 6 as const,
   current: {
     countryId: countries[state.cursor % countries.length].properties.id,
-    kind: 'new' as const,
+    kind: 'new',
     assisted: state.attempts[state.cursor]?.assisted ?? false,
-  },
+  } as Question,
   attempts: state.attempts.map(attempt => ({ ...attempt, kind: 'new' as const })),
 }));
 
@@ -97,11 +105,16 @@ function legacyAttemptId(attempt: Omit<Attempt, 'id'>, index: number): string {
 }
 
 function attemptContent(attempt: Omit<Attempt, 'id'>): string {
-  return JSON.stringify([
+  const content: unknown[] = [
     attempt.countryId, attempt.skill, attempt.boundaryVersion, attempt.factVersion,
     attempt.longitude, attempt.latitude, attempt.correct, attempt.assisted,
     attempt.selectedCountry, attempt.answeredAt, attempt.kind,
-  ]);
+  ];
+  // Keep historical hashes stable for migrated spatial answers.
+  if (attempt.difficultyContext !== undefined || attempt.selectedCountryId !== undefined) {
+    content.push(attempt.difficultyContext, attempt.selectedCountryId);
+  }
+  return JSON.stringify(content);
 }
 
 function unionAttempts(attempts: Attempt[]): Attempt[] {
@@ -122,11 +135,19 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
       : countries.find(country => country.properties.id === state.readingCountryId);
     if (state.cursor > state.attempts.length
       || (!state.started && (state.cursor !== 0 || state.attempts.length !== 0))
-      || new Set(state.pausedQuestions.map(question => question.countryId)).size !== state.pausedQuestions.length
-      || state.pausedQuestions.some(question => question.countryId === state.current?.countryId)
+      || new Set(state.pausedQuestions.map(learningItemKey)).size !== state.pausedQuestions.length
+      || state.pausedQuestions.some(question => state.current && learningItemKey(question) === learningItemKey(state.current))
       || (state.selection?.learning === 'country-facts'
         && (!readingCountry || !matchesFacets(readingCountry, state.selection)))
-      || (answer && (answer.countryId !== state.current?.countryId || answer.kind !== state.current.kind))) {
+      || state.attempts.some(attempt => attempt.skill === 'name-to-location'
+        ? attempt.longitude === undefined || attempt.latitude === undefined
+        : attempt.skill === 'shape-recognition' && (!attempt.difficultyContext || !attempt.selectedCountryId))
+      || [...state.pausedQuestions, ...(state.current ? [state.current] : [])]
+        .some(question => question.skill === 'shape-recognition' && !question.difficultyContext)
+      || (answer && (answer.countryId !== state.current?.countryId || answer.kind !== state.current.kind
+        || ((answer.skill === 'name-to-location' || answer.skill === 'shape-recognition')
+          && answer.skill !== (state.current.skill ?? 'name-to-location'))
+        || (answer.skill === 'shape-recognition' && answer.difficultyContext !== state.current.difficultyContext)))) {
       context.addIssue({ code: 'custom', message: 'Progress has an inconsistent active question or answer.' });
     }
   }).transform((state, context): Progress => {
@@ -148,14 +169,20 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
     };
   });
 
-// Without question IDs, two unfinished prompts for a country are conservatively
-// one prompt: help is never forgotten, and retry/practice cannot become retention.
+// Unfinished prompts merge per learning item, never across skills. Keep the
+// easiest context exposed and never turn retry/practice into retention.
 const kindRank: Record<Question['kind'], number> = { retry: 0, practice: 1, new: 2, review: 3 };
 function mergeQuestion(left: Question, right: Question): Question {
   return {
+    ...left,
     countryId: left.countryId,
     kind: kindRank[left.kind] < kindRank[right.kind] ? left.kind : right.kind,
     assisted: left.assisted || right.assisted,
+    ...(left.skill === 'shape-recognition' ? {
+      difficultyContext: difficultyContexts[Math.min(
+        difficultyContexts.indexOf(left.difficultyContext!), difficultyContexts.indexOf(right.difficultyContext!),
+      )],
+    } : {}),
   };
 }
 
@@ -174,21 +201,22 @@ export function mergeProgress(account: Progress, incoming: Progress): Progress {
     const questions = state.started && state.current && state.cursor === state.attempts.length
       ? [...state.pausedQuestions, state.current] : state.pausedQuestions;
     for (const question of questions) {
-      const previous = pending.get(question.countryId);
-      pending.set(question.countryId, previous ? mergeQuestion(previous, question) : { ...question });
+      const key = learningItemKey(question);
+      const previous = pending.get(key);
+      pending.set(key, previous ? mergeQuestion(previous, question) : { ...question });
       if (question.assisted) exposed.add(question.countryId);
     }
   }
   let current = active.current ? { ...active.current } : null;
   if (current) {
-    const question = pending.get(current.countryId);
+    const question = pending.get(learningItemKey(current));
     if (question && answerId === undefined) current = mergeQuestion(current, question);
     current.assisted ||= exposed.has(current.countryId);
-    pending.delete(current.countryId);
+    pending.delete(learningItemKey(current));
   }
   const pausedQuestions = [...pending.values()].map(question => ({
     ...question, assisted: question.assisted || exposed.has(question.countryId),
-  })).sort((a, b) => a.countryId < b.countryId ? -1 : a.countryId > b.countryId ? 1 : 0);
+  })).sort((a, b) => learningItemKey(a).localeCompare(learningItemKey(b)));
   return {
     ...active, started: saved.started || received.started, current, pausedQuestions, attempts,
     cursor: answerId === undefined ? attempts.length : attempts.findIndex(attempt => attempt.id === answerId),

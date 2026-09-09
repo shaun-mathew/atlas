@@ -2,8 +2,8 @@ import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 import { pointToPolygonDistance } from '@turf/point-to-polygon-distance';
 import { countries, introductionOrder } from './geography';
 import { factVersion } from './facts';
-import { facetSelectionSchema, matchesFacets, type FacetSelection } from './facets';
-import { boundaryVersion, initialProgress, progressSchema, type Attempt, type Progress } from './progress';
+import { difficultyContexts, facetSelectionSchema, matchesFacets, type DifficultyContext, type FacetSelection } from './facets';
+import { boundaryVersion, initialProgress, learningItemKey, progressSchema, type Attempt, type Progress, type Question } from './progress';
 
 const countriesById = new Map(countries.map(country => [country.properties.id, country]));
 type Proficiency = {
@@ -21,8 +21,11 @@ export class LearnerSession {
   private state = initialProgress();
   private learningItems = new Map<string, Proficiency>();
   private selectionHistory = new Map<string, { lastSeenIndex: number; weak: boolean }>();
-  private introductionsSinceRevisit = 0;
-  private supportedAttemptCount = 0;
+  private shapeContexts = new Map<string, { context: DifficultyContext; misses: number }>();
+  private selectionCounts = {
+    'name-to-location': { introductions: 0, attempts: 0 },
+    'shape-recognition': { introductions: 0, attempts: 0 },
+  };
   private readonly storageKey: string | null;
   onchange?: () => void;
   storageNotice = '';
@@ -56,15 +59,15 @@ export class LearnerSession {
   }
 
   private supportsAttempt(attempt: Attempt): boolean {
-    return countriesById.has(attempt.countryId) && attempt.skill === 'name-to-location'
+    return countriesById.has(attempt.countryId) && (attempt.skill === 'name-to-location' || attempt.skill === 'shape-recognition')
       && attempt.boundaryVersion === boundaryVersion && attempt.factVersion === factVersion;
   }
 
   private rebuild() {
     this.learningItems.clear();
     this.selectionHistory.clear();
-    this.introductionsSinceRevisit = 0;
-    this.supportedAttemptCount = 0;
+    this.shapeContexts.clear();
+    for (const count of Object.values(this.selectionCounts)) { count.introductions = 0; count.attempts = 0; }
     for (const attempt of this.attempts) this.recordAttempt(attempt);
     const current = this.state.current;
     const answer = this.attempts[this.cursor];
@@ -82,6 +85,13 @@ export class LearnerSession {
   get attempts() { return this.state.attempts; }
   get readingFacts() { return this.selection?.learning === 'country-facts'; }
   get questionKind() { return this.readingFacts ? undefined : this.state.current?.kind; }
+  get skill() { return this.state.current?.skill ?? 'name-to-location'; }
+  get recognizingShape() { return !this.readingFacts && this.skill === 'shape-recognition'; }
+  get difficultyContext() { return this.recognizingShape ? this.state.current?.difficultyContext : undefined; }
+  get nextDifficultyContext() {
+    return this.recognizingShape && this.state.current
+      ? this.shapeContexts.get(learningItemKey(this.state.current))?.context ?? this.difficultyContext : undefined;
+  }
   get assisted() { return !this.readingFacts && (this.state.current?.assisted ?? false); }
   get country() {
     const id = this.readingFacts ? this.state.readingCountryId : this.state.current?.countryId;
@@ -89,14 +99,15 @@ export class LearnerSession {
   }
   get feedback() { return this.readingFacts ? undefined : this.attempts[this.cursor]; }
   get proficiency() {
-    return !this.readingFacts && this.state.current ? this.learningItems.get(`${this.state.current.countryId}:name-to-location`) : undefined;
+    return !this.readingFacts && this.state.current ? this.learningItems.get(learningItemKey(this.state.current)) : undefined;
   }
   get selection() { return this.state.selection; }
 
   choosePractice(selection: FacetSelection | null) {
     const nextSelection = selection === null ? null : facetSelectionSchema.parse(selection);
     if (this.started && nextSelection?.continent === this.selection?.continent
-      && nextSelection?.region === this.selection?.region && nextSelection?.learning === this.selection?.learning) return;
+      && nextSelection?.region === this.selection?.region && nextSelection?.learning === this.selection?.learning
+      && nextSelection?.startingContext === this.selection?.startingContext) return;
     this.state.selection = nextSelection;
     if (this.readingFacts) {
       this.selectFactCountry(introductionOrder.find(country => matchesFacets(country, this.selection!))!.properties.id);
@@ -113,13 +124,17 @@ export class LearnerSession {
 
   private selectFactCountry(countryId: string): boolean {
     this.state.readingCountryId = countryId;
-    // The reading map reveals location just like linked-map help. Preserve that
-    // exposure on an unanswered prompt without recording an attempt or review.
-    const pending = this.state.current?.countryId === countryId && !this.attempts[this.cursor]
-      ? this.state.current : this.state.pausedQuestions.find(question => question.countryId === countryId);
-    if (!pending || pending.assisted) return false;
-    pending.assisted = true;
-    return true;
+    // The reading map exposes both outline and location. Preserve that exposure
+    // on every pending skill for the entity without recording an assessment.
+    const pending = this.state.current && !this.attempts[this.cursor]
+      ? [this.state.current, ...this.state.pausedQuestions] : this.state.pausedQuestions;
+    let changed = false;
+    for (const question of pending) {
+      if (question.countryId !== countryId || question.assisted) continue;
+      question.assisted = true;
+      changed = true;
+    }
+    return changed;
   }
 
   reset(): boolean {
@@ -134,8 +149,8 @@ export class LearnerSession {
     this.state = fresh;
     this.learningItems.clear();
     this.selectionHistory.clear();
-    this.introductionsSinceRevisit = 0;
-    this.supportedAttemptCount = 0;
+    this.shapeContexts.clear();
+    for (const count of Object.values(this.selectionCounts)) { count.introductions = 0; count.attempts = 0; }
     this.storageNotice = '';
     this.onchange?.();
     return true;
@@ -149,7 +164,7 @@ export class LearnerSession {
 
 
   requestLocationHelp() {
-    if (!this.started || this.readingFacts || !this.state.current || this.feedback || this.assisted) return;
+    if (!this.started || this.readingFacts || this.recognizingShape || !this.state.current || this.feedback || this.assisted) return;
     this.state.current.assisted = true;
     this.save();
   }
@@ -164,11 +179,44 @@ export class LearnerSession {
     this.onchange?.();
   }
 
+  private updateShapeContext(attempt: Attempt): boolean {
+    if (attempt.skill !== 'shape-recognition' || !attempt.difficultyContext) return false;
+    const key = learningItemKey(attempt);
+    const previous = this.shapeContexts.get(key);
+    let context = previous?.context ?? attempt.difficultyContext;
+    let misses = attempt.correct ? 0 : (previous?.misses ?? 0) + 1;
+    const repeatedMiss = misses >= 2;
+    if (attempt.correct && !attempt.assisted && (attempt.kind === 'new' || attempt.kind === 'review')) {
+      // A remembered answer on immediate retry is not evidence for fewer clues.
+      context = difficultyContexts[Math.max(difficultyContexts.indexOf(context),
+        Math.min(difficultyContexts.length - 1, difficultyContexts.indexOf(attempt.difficultyContext) + 1))];
+    }
+    if (repeatedMiss) {
+      context = difficultyContexts[Math.max(0, Math.min(
+        difficultyContexts.indexOf(context), difficultyContexts.indexOf(attempt.difficultyContext),
+      ) - 1)];
+      misses = 0;
+    }
+    this.shapeContexts.set(key, { context, misses });
+    return repeatedMiss;
+  }
+
   private updateProficiency(attempt: Attempt) {
-    // Immediate retries and extra practice do not measure scheduled retention.
-    if (attempt.kind === 'retry' || attempt.kind === 'practice') return;
-    const key = `${attempt.countryId}:${attempt.skill}`;
+    const repeatedShapeMiss = this.updateShapeContext(attempt);
+    const key = learningItemKey(attempt);
     const previous = this.learningItems.get(key);
+    // Practice never earns retention. Repeated shape misses can bring a check
+    // forward, but a retry cannot postpone one that is already scheduled.
+    if (attempt.kind === 'retry' || attempt.kind === 'practice') {
+      if (repeatedShapeMiss) {
+        const recheckAt = new Date(Date.parse(attempt.answeredAt) + 10 * 60 * 1000).toISOString();
+        this.learningItems.set(key, {
+          level: 'Learning', intervalDays: 0,
+          dueAt: previous && previous.dueAt < recheckAt ? previous.dueAt : recheckAt,
+        });
+      }
+      return;
+    }
     const unassistedSuccess = attempt.correct && !attempt.assisted;
     const intervalDays = unassistedSuccess
       ? attempt.kind === 'review'
@@ -184,25 +232,27 @@ export class LearnerSession {
 
   private recordAttempt(attempt: Attempt) {
     if (!this.supportsAttempt(attempt)) return;
-    const index = this.supportedAttemptCount++;
+    const count = this.selectionCounts[attempt.skill as keyof typeof this.selectionCounts];
+    const index = count.attempts++;
     this.updateProficiency(attempt);
-    let history = this.selectionHistory.get(attempt.countryId);
+    const key = learningItemKey(attempt);
+    let history = this.selectionHistory.get(key);
     if (!history) {
       history = { lastSeenIndex: index, weak: false };
-      this.selectionHistory.set(attempt.countryId, history);
+      this.selectionHistory.set(key, history);
     } else {
       history.lastSeenIndex = index;
     }
     // Retries delay this country's next revisit without erasing its weakness.
     if (attempt.kind === 'retry') return;
     history.weak = !attempt.correct || attempt.assisted;
-    if (attempt.kind === 'new') this.introductionsSinceRevisit += 1;
-    else this.introductionsSinceRevisit = 0;
+    if (attempt.kind === 'new') count.introductions += 1;
+    else count.introductions = 0;
   }
 
   answer(longitude: number, latitude: number) {
     const country = this.country;
-    if (!this.started || this.readingFacts || !country || this.feedback || !Number.isFinite(longitude) || !Number.isFinite(latitude)
+    if (!this.started || this.readingFacts || this.recognizingShape || !country || this.feedback || !Number.isFinite(longitude) || !Number.isFinite(latitude)
       || Math.abs(longitude) > 180 || Math.abs(latitude) > 90) return;
     const point = [longitude, latitude];
     const inside = booleanPointInPolygon(point, country);
@@ -222,6 +272,29 @@ export class LearnerSession {
       selectedCountry: selected?.properties.name ?? null,
       answeredAt: new Date().toISOString(),
     };
+    this.commitAttempt(attempt);
+  }
+
+  answerCountry(countryId: string) {
+    const country = this.country;
+    const selected = countriesById.get(countryId);
+    if (!this.started || !this.recognizingShape || !country || this.feedback || !selected) return;
+    this.commitAttempt({
+      id: `attempt-${this.attempts.length.toString(36).padStart(10, '0')}-${crypto.randomUUID()}`,
+      countryId: country.properties.id,
+      skill: 'shape-recognition',
+      difficultyContext: this.difficultyContext,
+      kind: this.state.current!.kind,
+      assisted: this.assisted,
+      boundaryVersion, factVersion,
+      correct: countryId === country.properties.id,
+      selectedCountryId: countryId,
+      selectedCountry: selected.properties.name,
+      answeredAt: new Date().toISOString(),
+    });
+  }
+
+  private commitAttempt(attempt: Attempt) {
     this.attempts.push(attempt);
     const previous = this.attempts[this.attempts.length - 2];
     if (previous && (previous.answeredAt > attempt.answeredAt
@@ -239,8 +312,10 @@ export class LearnerSession {
   retry() {
     if (!this.feedback || this.feedback.correct) return;
     this.state.current = {
+      ...this.state.current,
       countryId: this.feedback.countryId, kind: 'retry',
       assisted: this.feedback.assisted || (this.state.current?.assisted ?? false),
+      ...(this.recognizingShape ? { difficultyContext: this.nextDifficultyContext } : {}),
     };
     this.state.cursor = this.attempts.length;
     this.save();
@@ -248,11 +323,19 @@ export class LearnerSession {
 
   private selectQuestion(now: string) {
     const selected = this.selectAdaptive(now);
-    const index = this.state.pausedQuestions.findIndex(question => question.countryId === selected.countryId);
+    const index = this.state.pausedQuestions.findIndex(question => learningItemKey(question) === learningItemKey(selected));
     return index < 0 ? selected : this.state.pausedQuestions.splice(index, 1)[0];
   }
 
-  private selectAdaptive(now: string) {
+  private selectAdaptive(now: string): Question {
+    const skill = this.selection?.learning === 'shape-recognition' ? 'shape-recognition' : 'name-to-location';
+    const count = this.selectionCounts[skill];
+    const question = (countryId: string, kind: Question['kind']): Question => ({
+      countryId, kind, assisted: false,
+      ...(skill === 'shape-recognition' ? {
+        skill, difficultyContext: this.shapeContexts.get(`${countryId}:${skill}`)?.context ?? this.selection?.startingContext ?? 'rich',
+      } : {}),
+    });
     let dueCountryId: string | undefined;
     let earliestDueAt: string | undefined;
     let revisitCountryId: string | undefined;
@@ -262,33 +345,33 @@ export class LearnerSession {
     for (const country of countries) {
       if (this.selection && !matchesFacets(country, this.selection)) continue;
       const countryId = country.properties.id;
-      const item = this.learningItems.get(`${countryId}:name-to-location`);
+      const item = this.learningItems.get(`${countryId}:${skill}`);
       if (item && item.dueAt <= now && (!earliestDueAt || item.dueAt < earliestDueAt)) {
         dueCountryId = countryId;
         earliestDueAt = item.dueAt;
       }
-      const history = this.selectionHistory.get(countryId);
+      const history = this.selectionHistory.get(`${countryId}:${skill}`);
       if (!history) continue;
       if (history.lastSeenIndex < oldestSeenIndex) {
         oldestCountryId = countryId;
         oldestSeenIndex = history.lastSeenIndex;
       }
-      if (this.supportedAttemptCount - history.lastSeenIndex > 2
+      if (count.attempts - history.lastSeenIndex > 2
         && (!revisitHistory || (history.weak && !revisitHistory.weak)
           || (history.weak === revisitHistory.weak && history.lastSeenIndex < revisitHistory.lastSeenIndex))) {
         revisitCountryId = countryId;
         revisitHistory = history;
       }
     }
-    if (dueCountryId) return { countryId: dueCountryId, kind: 'review' as const, assisted: false };
+    if (dueCountryId) return question(dueCountryId, 'review');
     const unseenCountryId = introductionOrder.find(country =>
-      (!this.selection || matchesFacets(country, this.selection)) && !this.selectionHistory.has(country.properties.id))?.properties.id;
-    if (revisitCountryId && (this.introductionsSinceRevisit >= 2 || !unseenCountryId)) {
-      return { countryId: revisitCountryId, kind: 'practice' as const, assisted: false };
+      (!this.selection || matchesFacets(country, this.selection)) && !this.selectionHistory.has(`${country.properties.id}:${skill}`))?.properties.id;
+    if (revisitCountryId && (count.introductions >= 2 || !unseenCountryId)) {
+      return question(revisitCountryId, 'practice');
     }
-    if (unseenCountryId) return { countryId: unseenCountryId, kind: 'new' as const, assisted: false };
+    if (unseenCountryId) return question(unseenCountryId, 'new');
     // With no unseen countries, at least one answered country must exist.
-    return { countryId: oldestCountryId!, kind: 'practice' as const, assisted: false };
+    return question(oldestCountryId!, 'practice');
   }
 
   next() {

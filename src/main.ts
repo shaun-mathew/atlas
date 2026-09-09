@@ -10,13 +10,19 @@ import { MapPin } from './map-pin';
 import { GeographyRenderer } from './geography-renderer';
 import { Globe } from './globe';
 import { createFacetSetup } from './facet-setup';
-import { describeFacets } from './facets';
+import { contextLabels, describeFacets, learningLabels } from './facets';
+import { renderShape, shapeDescriptions } from './shape-presentation';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
   <div id="map" role="region" aria-label="World map"></div>
   <section id="globe" role="region" aria-label="World globe" hidden>
     <small class="globe-attribution">Natural Earth · Public domain</small>
+  </section>
+  <section id="shape-presentation" aria-label="Shape question" hidden>
+    <div id="shape-geography"></div>
+    <p id="shape-description"></p>
+    <small>Natural Earth · Public domain</small>
   </section>
   <div id="overview-label" class="linked-map-heading" hidden><span>Regional overview</span></div>
   <section id="linked-detail" hidden>
@@ -78,10 +84,16 @@ app.innerHTML = `
         </div>
       </div>
       <p id="guided-note" hidden>Location help used · guided practice, not retention credit.</p>
+      <p id="difficulty-context" class="eyebrow" hidden></p>
       <div class="answer-dock">
+        <div id="country-answer" hidden>
+          <label for="country-choice">Country or territory</label>
+          <select id="country-choice" aria-describedby="shape-answer-help"></select>
+          <p id="shape-answer-help">Identify the highlighted shape. Choose a country, then check your answer.</p>
+        </div>
         <div id="feedback" role="status" aria-live="polite"></div>
         <section id="proficiency" aria-label="Name-to-location proficiency" hidden>
-          <p>Name-to-location · <strong id="proficiency-level"></strong></p>
+          <p><span id="proficiency-skill">Name-to-location</span> · <strong id="proficiency-level"></strong></p>
           <p>Review due <time id="review-at"></time></p>
           <p id="retry-note" hidden>Immediate retry records practice, not retention; your review time stays unchanged.</p>
           <p id="practice-note" hidden>Practice revisit reinforces this country without changing retention proficiency or its scheduled review.</p>
@@ -148,6 +160,12 @@ const feedback = document.querySelector<HTMLDivElement>('#feedback')!;
 const factCard = document.querySelector<HTMLElement>('#country-fact-card')!;
 const check = document.querySelector<HTMLButtonElement>('#check')!;
 const next = document.querySelector<HTMLButtonElement>('#next')!;
+const countryChoice = document.querySelector<HTMLSelectElement>('#country-choice')!;
+countryChoice.replaceChildren(new Option('Choose a country or territory', ''),
+  ...[...countries].sort((a, b) => a.properties.name.localeCompare(b.properties.name))
+    .map(country => new Option(country.properties.name, country.properties.id)));
+countryChoice.options[0].disabled = true;
+const shapePresentation = document.querySelector<HTMLElement>('#shape-presentation')!;
 const retry = document.querySelector<HTMLButtonElement>('#retry')!;
 const storageNotice = document.querySelector<HTMLParagraphElement>('#storage-notice')!;
 const profile = document.querySelector<HTMLDialogElement>('#profile-dialog')!;
@@ -415,6 +433,16 @@ function renderQuestion(animate = true) {
   answerPolygon?.getElement()?.classList.remove('answer-border');
   answerPolygon = undefined;
   const reading = session.readingFacts;
+  const shape = session.started && session.recognizingShape;
+  app.classList.toggle('has-shape', shape);
+  shapePresentation.hidden = !shape;
+  document.querySelector<HTMLElement>('.location-tools')!.hidden = shape;
+  document.querySelector<HTMLElement>('#country-answer')!.hidden = !shape || !!session.feedback;
+  countryChoice.value = '';
+  document.querySelector<HTMLElement>('#difficulty-context')!.hidden = !shape;
+  document.querySelector('#difficulty-context')!.textContent = shape
+    ? `${contextLabels[session.difficultyContext!]}${session.feedback ? ` · Next shape check: ${contextLabels[session.nextDifficultyContext!]}` : ''}` : '';
+  document.querySelector('.prompt')!.textContent = shape ? 'Which country is' : 'Where is';
   app.classList.toggle('is-reading', reading);
   const selectedFacets = session.selection;
   document.querySelector<HTMLElement>('#current-facets')!.hidden = !selectedFacets;
@@ -424,14 +452,14 @@ function renderQuestion(animate = true) {
   document.querySelector<HTMLElement>('#welcome')!.hidden = session.started;
   const country = session.country;
   const answer = session.feedback;
-  if (linkedOpen) globeOpen = false;
+  if (linkedOpen || shape) globeOpen = false;
   app.classList.toggle('has-globe', globeOpen);
   globeContainer.hidden = !globeOpen;
-  map.getContainer().hidden = globeOpen;
+  map.getContainer().hidden = globeOpen || shape;
   presentationButton.dataset.presentation = globeOpen ? 'globe' : 'map';
   presentationButton.setAttribute('aria-label', presentationButton.disabled ? '3D globe unavailable' : globeOpen ? 'Switch to 2D map' : 'Switch to 3D globe');
   globe?.setVisible(globeOpen);
-  const showLinked = session.started && !!country && linkedOpen && !reading;
+  const showLinked = session.started && !!country && linkedOpen && !reading && !shape;
   app.classList.toggle('has-linked-maps', showLinked);
   updateZoomControls();
   document.querySelector<HTMLElement>('#linked-detail')!.hidden = !showLinked;
@@ -440,7 +468,8 @@ function renderQuestion(animate = true) {
   if (!showLinked) linkedMaps.hide();
   document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
   countryName.replaceChildren();
-  for (const word of country?.properties.name.split(' ') ?? []) {
+  const heading = shape ? 'this shape' : country?.properties.name;
+  for (const word of heading?.split(' ') ?? []) {
     if (countryName.firstChild) countryName.append(' ');
     const part = document.createElement('span');
     part.textContent = word;
@@ -474,7 +503,17 @@ function renderQuestion(animate = true) {
   retry.hidden = !answer || answer.correct;
   document.querySelector<HTMLElement>('#retry-note')!.hidden = session.questionKind !== 'retry';
   document.querySelector<HTMLElement>('#practice-note')!.hidden = session.questionKind !== 'practice';
+  document.querySelector('#retry-note')!.textContent = shape
+    ? 'Immediate retry cannot earn retention or postpone a review. Repeated misses restore clues and bring a recheck forward.'
+    : 'Immediate retry records practice, not retention; your review time stays unchanged.';
+  document.querySelector('#practice-note')!.textContent = shape
+    ? 'Practice revisit cannot earn retention. Repeated misses restore clues and schedule an earlier recheck.'
+    : 'Practice revisit reinforces this country without changing retention proficiency or its scheduled review.';
   check.hidden = !!answer || reading;
+  check.firstChild!.textContent = shape ? 'Check answer ' : 'Check location ';
+  const skillLabel = learningLabels[shape ? 'shape-recognition' : 'name-to-location'];
+  proficiency.setAttribute('aria-label', `${skillLabel} proficiency`);
+  document.querySelector('#proficiency-skill')!.textContent = skillLabel;
   check.disabled = true;
   const itemProficiency = session.proficiency;
   proficiency.hidden = !itemProficiency;
@@ -495,11 +534,13 @@ function renderQuestion(animate = true) {
     const result = document.createElement('strong');
     result.textContent = answer.assisted
       ? answer.correct ? 'Correct — guided practice.' : 'Not quite — guided practice.'
-      : answer.correct ? 'Correct — well placed.' : 'Not quite — take another look.';
+      : answer.correct ? shape ? 'Correct — recognized.' : 'Correct — well placed.' : 'Not quite — take another look.';
     const explanation = document.createElement('span');
-    explanation.textContent = `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${answer.correct
-      ? 'Your selection is within the accepted geographic tolerance.'
-      : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
+    explanation.textContent = shape
+      ? `This is ${country.properties.name}. ${answer.correct ? 'You identified the country.' : `You selected ${answer.selectedCountry}.`}`
+      : `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${answer.correct
+        ? 'Your selection is within the accepted geographic tolerance.'
+        : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
     feedback.replaceChildren(result, explanation);
     // Siachen Glacier is a disputed geographic area without its own country flag.
     if (country.properties.id !== 'KAS') {
@@ -513,15 +554,22 @@ function renderQuestion(animate = true) {
     }
   }
   fitCountryHeading();
+  if (shape && country) {
+    renderShape(document.querySelector<HTMLElement>('#shape-geography')!, country, session.difficultyContext!);
+    document.querySelector('#shape-description')!.textContent = shapeDescriptions[session.difficultyContext!];
+    return;
+  }
+  const spatialAnswer = answer && answer.longitude !== undefined && answer.latitude !== undefined
+    ? { longitude: answer.longitude, latitude: answer.latitude, correct: answer.correct } : undefined;
   // Finish the panel and surface layout before measuring a destination or
   // starting travel. invalidateSize must not refocus the previous answer.
   if (!showLinked) map.invalidateSize({ pan: false, animate: false });
-  globe?.showAnswer(answer || reading ? country ?? undefined : undefined, answer ?? undefined);
+  globe?.showAnswer(answer || reading ? country ?? undefined : undefined, spatialAnswer);
   if (showLinked && country) {
-    linkedMaps.show(country, answer ?? undefined);
+    linkedMaps.show(country, spatialAnswer);
   } else if (country && (answer || reading)) {
     highlightCountry(country.properties.id);
-    if (answer) marker = new MapPin(map, [answer.latitude, answer.longitude], answer.correct);
+    if (spatialAnswer) marker = new MapPin(map, [spatialAnswer.latitude, spatialAnswer.longitude], spatialAnswer.correct);
     if (!globeOpen) focusAnswer(animate);
   } else resetWorld(animate);
 }
@@ -538,7 +586,7 @@ function highlightCountry(countryId: string) {
 }
 
 function selectPoint(point: L.LatLng) {
-  if (!session.started || session.readingFacts || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
+  if (!session.started || session.readingFacts || session.recognizingShape || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
   pendingPoint = point;
   globe?.setSelection({ longitude: point.lng, latitude: point.lat });
   if (!linkedOpen && !globeOpen) {
@@ -564,21 +612,29 @@ document.querySelector('#start')!.addEventListener('click', () => {
   linkedOpen = false;
   renderQuestion();
 });
+countryChoice.addEventListener('change', () => {
+  check.disabled = !countryChoice.value || !!session.feedback;
+});
 check.addEventListener('click', () => {
-  if (!pendingPoint || session.feedback) return;
-  session.answer(pendingPoint.lng, pendingPoint.lat);
+  if (session.feedback) return;
+  if (session.recognizingShape) session.answerCountry(countryChoice.value);
+  else if (pendingPoint) session.answer(pendingPoint.lng, pendingPoint.lat);
+  else return;
   renderQuestion();
+  if (session.recognizingShape && session.feedback) next.focus();
 });
 next.addEventListener('click', () => {
   session.next();
   linkedOpen = false;
   renderQuestion();
+  if (session.recognizingShape) countryChoice.focus();
   if (globeOpen) globe?.reset();
 });
 retry.addEventListener('click', () => {
   session.retry();
   linkedOpen = session.assisted;
   renderQuestion();
+  if (session.recognizingShape) countryChoice.focus();
 });
 document.querySelector('#location-help')!.addEventListener('click', () => {
   session.requestLocationHelp();
