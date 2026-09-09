@@ -10,7 +10,7 @@ import { MapPin } from './map-pin';
 import { GeographyRenderer } from './geography-renderer';
 import { Globe } from './globe';
 import { createFacetSetup } from './facet-setup';
-import { describeFacets } from './facets';
+import { describeFacets, learningLabels } from './facets';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
@@ -79,9 +79,16 @@ app.innerHTML = `
       </div>
       <p id="guided-note" hidden>Location help used · guided practice, not retention credit.</p>
       <div class="answer-dock">
+        <div id="recognition-search" hidden>
+          <label for="country-search">Search countries & territories</label>
+          <p id="search-instructions">Name the highlighted country. Type to filter, then select a result. Use ↑ and ↓ to browse and Enter to select.</p>
+          <input id="country-search" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="country-results" aria-describedby="search-instructions" autocomplete="off" spellcheck="false">
+          <ul id="country-results" role="listbox" aria-label="Matching countries & territories" hidden></ul>
+          <p id="search-summary" aria-live="polite"></p>
+        </div>
         <div id="feedback" role="status" aria-live="polite"></div>
         <section id="proficiency" aria-label="Name-to-location proficiency" hidden>
-          <p>Name-to-location · <strong id="proficiency-level"></strong></p>
+          <p><span id="proficiency-skill">Name-to-location</span> · <strong id="proficiency-level"></strong></p>
           <p>Review due <time id="review-at"></time></p>
           <p id="retry-note" hidden>Immediate retry records practice, not retention; your review time stays unchanged.</p>
           <p id="practice-note" hidden>Practice revisit reinforces this country without changing retention proficiency or its scheduled review.</p>
@@ -161,9 +168,16 @@ const questionLabels: Record<'new' | 'review' | 'retry' | 'practice', string> = 
   new: 'New learning item', review: 'Scheduled review', retry: 'Immediate retry', practice: 'Practice revisit',
 };
 let pendingPoint: L.LatLng | null = null;
+let selectedCountryId: string | null = null;
+let searchResults: Country[] = [];
+let activeResult = -1;
+const recognitionSearch = document.querySelector<HTMLElement>('#recognition-search')!;
+const countrySearch = document.querySelector<HTMLInputElement>('#country-search')!;
+const countryResults = document.querySelector<HTMLElement>('#country-results')!;
+const searchSummary = document.querySelector<HTMLElement>('#search-summary')!;
 let marker: MapPin | undefined;
 let answerPolygon: L.Polygon | undefined;
-let linkedOpen = session.assisted;
+let linkedOpen = session.assisted || session.recognizingLocation;
 let globe: Globe | undefined;
 let globeOpen = false;
 const globeContainer = document.querySelector<HTMLElement>('#globe')!;
@@ -415,6 +429,8 @@ function renderQuestion(animate = true) {
   answerPolygon?.getElement()?.classList.remove('answer-border');
   answerPolygon = undefined;
   const reading = session.readingFacts;
+  const recognition = session.recognizingLocation;
+  app.classList.toggle('is-recognizing', recognition);
   app.classList.toggle('is-reading', reading);
   const selectedFacets = session.selection;
   document.querySelector<HTMLElement>('#current-facets')!.hidden = !selectedFacets;
@@ -439,8 +455,10 @@ function renderQuestion(animate = true) {
   map.getContainer().setAttribute('aria-label', showLinked ? 'Regional overview' : 'World map');
   if (!showLinked) linkedMaps.hide();
   document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
+  document.querySelector('#session > .prompt')!.textContent = recognition ? 'What is' : 'Where is';
   countryName.replaceChildren();
-  for (const word of country?.properties.name.split(' ') ?? []) {
+  const heading = recognition && !answer ? 'this country' : country?.properties.name;
+  for (const word of heading?.split(' ') ?? []) {
     if (countryName.firstChild) countryName.append(' ');
     const part = document.createElement('span');
     part.textContent = word;
@@ -455,10 +473,10 @@ function renderQuestion(animate = true) {
   guidedSummary.textContent = guidedCount ? ` · ${guidedCount} guided` : '';
   guidedSummary.hidden = guidedCount === 0;
   const locationHelp = document.querySelector<HTMLButtonElement>('#location-help')!;
-  locationHelp.textContent = answer ? 'Explore location' : 'Show location';
+  locationHelp.textContent = recognition ? 'Explore target' : answer ? 'Explore location' : 'Show location';
   locationHelp.hidden = showLinked;
   document.querySelector<HTMLElement>('#linked-actions')!.hidden = !showLinked;
-  document.querySelector<HTMLElement>('#help-warning')!.hidden = !!answer || showLinked || session.assisted;
+  document.querySelector<HTMLElement>('#help-warning')!.hidden = recognition || !!answer || showLinked || session.assisted;
   document.querySelector<HTMLElement>('#guided-note')!.hidden = !session.assisted;
   storageNotice.textContent = session.storageNotice;
   storageNotice.hidden = !session.storageNotice;
@@ -476,6 +494,15 @@ function renderQuestion(animate = true) {
   document.querySelector<HTMLElement>('#practice-note')!.hidden = session.questionKind !== 'practice';
   check.hidden = !!answer || reading;
   check.disabled = true;
+  check.firstChild!.textContent = recognition ? 'Check country ' : 'Check location ';
+  recognitionSearch.hidden = !recognition || !!answer;
+  selectedCountryId = null;
+  countrySearch.value = '';
+  closeCountryResults();
+  searchSummary.textContent = '';
+  const skillLabel = learningLabels[session.skill];
+  proficiency.setAttribute('aria-label', `${skillLabel} proficiency`);
+  document.querySelector('#proficiency-skill')!.textContent = skillLabel;
   const itemProficiency = session.proficiency;
   proficiency.hidden = !itemProficiency;
   if (itemProficiency) {
@@ -495,11 +522,12 @@ function renderQuestion(animate = true) {
     const result = document.createElement('strong');
     result.textContent = answer.assisted
       ? answer.correct ? 'Correct — guided practice.' : 'Not quite — guided practice.'
-      : answer.correct ? 'Correct — well placed.' : 'Not quite — take another look.';
+      : answer.correct ? recognition ? 'Correct — country identified.' : 'Correct — well placed.' : 'Not quite — take another look.';
     const explanation = document.createElement('span');
-    explanation.textContent = `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${answer.correct
-      ? 'Your selection is within the accepted geographic tolerance.'
-      : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
+    explanation.textContent = `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${recognition
+      ? `You selected ${answer.selectedCountry}.`
+      : answer.correct ? 'Your selection is within the accepted geographic tolerance.'
+        : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
     feedback.replaceChildren(result, explanation);
     // Siachen Glacier is a disputed geographic area without its own country flag.
     if (country.properties.id !== 'KAS') {
@@ -516,12 +544,14 @@ function renderQuestion(animate = true) {
   // Finish the panel and surface layout before measuring a destination or
   // starting travel. invalidateSize must not refocus the previous answer.
   if (!showLinked) map.invalidateSize({ pan: false, animate: false });
-  globe?.showAnswer(answer || reading ? country ?? undefined : undefined, answer ?? undefined);
+  const pointAnswer = answer?.longitude !== undefined && answer.latitude !== undefined
+    ? { longitude: answer.longitude, latitude: answer.latitude, correct: answer.correct } : undefined;
+  globe?.showAnswer(answer || reading || recognition ? country ?? undefined : undefined, pointAnswer);
   if (showLinked && country) {
-    linkedMaps.show(country, answer ?? undefined);
-  } else if (country && (answer || reading)) {
+    linkedMaps.show(country, pointAnswer, { hideTargetName: recognition && !answer, selectable: !recognition });
+  } else if (country && (answer || reading || recognition)) {
     highlightCountry(country.properties.id);
-    if (answer) marker = new MapPin(map, [answer.latitude, answer.longitude], answer.correct);
+    if (pointAnswer) marker = new MapPin(map, [pointAnswer.latitude, pointAnswer.longitude], pointAnswer.correct);
     if (!globeOpen) focusAnswer(animate);
   } else resetWorld(animate);
 }
@@ -538,7 +568,7 @@ function highlightCountry(countryId: string) {
 }
 
 function selectPoint(point: L.LatLng) {
-  if (!session.started || session.readingFacts || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
+  if (!session.started || session.readingFacts || session.recognizingLocation || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
   pendingPoint = point;
   globe?.setSelection({ longitude: point.lng, latitude: point.lat });
   if (!linkedOpen && !globeOpen) {
@@ -549,6 +579,73 @@ function selectPoint(point: L.LatLng) {
   feedback.textContent = `${Math.abs(point.lat).toFixed(1)}° ${point.lat >= 0 ? 'N' : 'S'} / ${Math.abs(point.lng).toFixed(1)}° ${point.lng >= 0 ? 'E' : 'W'}`;
   check.disabled = false;
 }
+
+function closeCountryResults() {
+  countryResults.hidden = true;
+  countryResults.replaceChildren();
+  countrySearch.setAttribute('aria-expanded', 'false');
+  countrySearch.removeAttribute('aria-activedescendant');
+  activeResult = -1;
+}
+
+function renderCountryResults() {
+  searchResults = session.searchCountries(countrySearch.value);
+  activeResult = -1;
+  countrySearch.removeAttribute('aria-activedescendant');
+  countryResults.replaceChildren(...searchResults.map(country => {
+    const option = document.createElement('li');
+    option.id = `country-option-${country.properties.id}`;
+    option.role = 'option';
+    option.dataset.countryId = country.properties.id;
+    option.setAttribute('aria-selected', String(country.properties.id === selectedCountryId));
+    option.textContent = country.properties.name;
+    return option;
+  }));
+  countryResults.hidden = false;
+  countrySearch.setAttribute('aria-expanded', 'true');
+  searchSummary.textContent = searchResults.length ? `${searchResults.length} matching countries & territories` : 'No matching countries or territories in this practice set.';
+}
+
+function selectCountryResult(country: Country) {
+  selectedCountryId = country.properties.id;
+  countrySearch.value = country.properties.name;
+  closeCountryResults();
+  searchSummary.textContent = `${country.properties.name} selected. Check country to answer.`;
+  check.disabled = false;
+}
+
+countrySearch.addEventListener('input', () => {
+  selectedCountryId = null;
+  check.disabled = true;
+  renderCountryResults();
+});
+countrySearch.addEventListener('focus', renderCountryResults);
+countrySearch.addEventListener('blur', closeCountryResults);
+countrySearch.addEventListener('keydown', event => {
+  if (event.isComposing) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeCountryResults();
+  } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    if (countryResults.hidden) renderCountryResults();
+    if (!searchResults.length) return;
+    activeResult = (activeResult + (event.key === 'ArrowDown' ? 1 : activeResult < 0 ? 0 : -1) + searchResults.length) % searchResults.length;
+    const options = Array.from(countryResults.children) as HTMLElement[];
+    options.forEach((option, index) => option.setAttribute('aria-selected', String(index === activeResult)));
+    countrySearch.setAttribute('aria-activedescendant', options[activeResult].id);
+    options[activeResult].scrollIntoView({ block: 'nearest' });
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    if (!countryResults.hidden && activeResult >= 0) selectCountryResult(searchResults[activeResult]);
+  }
+});
+countryResults.addEventListener('pointerdown', event => { event.preventDefault(); });
+countryResults.addEventListener('click', event => {
+  const option = (event.target as HTMLElement).closest<HTMLElement>('[role="option"]');
+  const country = searchResults.find(result => result.properties.id === option?.dataset.countryId);
+  if (country) selectCountryResult(country);
+});
 map.on('click', (event: L.LeafletMouseEvent) => {
   if (linkedOpen) return;
   // Leaflet commits the target projection before its CSS zoom is visible.
@@ -565,19 +662,25 @@ document.querySelector('#start')!.addEventListener('click', () => {
   renderQuestion();
 });
 check.addEventListener('click', () => {
-  if (!pendingPoint || session.feedback) return;
-  session.answer(pendingPoint.lng, pendingPoint.lat);
+  if (session.feedback) return;
+  if (session.recognizingLocation) {
+    if (!selectedCountryId) return;
+    session.answerCountry(selectedCountryId);
+  } else {
+    if (!pendingPoint) return;
+    session.answer(pendingPoint.lng, pendingPoint.lat);
+  }
   renderQuestion();
 });
 next.addEventListener('click', () => {
   session.next();
-  linkedOpen = false;
+  linkedOpen = session.assisted || session.recognizingLocation;
   renderQuestion();
-  if (globeOpen) globe?.reset();
+  if (globeOpen && !session.recognizingLocation) globe?.reset();
 });
 retry.addEventListener('click', () => {
   session.retry();
-  linkedOpen = session.assisted;
+  linkedOpen = session.assisted || session.recognizingLocation;
   renderQuestion();
 });
 document.querySelector('#location-help')!.addEventListener('click', () => {
@@ -638,7 +741,7 @@ document.querySelector('#confirm-reset')!.addEventListener('click', async () => 
 });
 const facetSetup = createFacetSetup(selection => {
   session.choosePractice(selection);
-  linkedOpen = session.assisted;
+  linkedOpen = session.assisted || session.recognizingLocation;
   renderQuestion();
 });
 document.querySelector('#facet-mode')!.addEventListener('click', () => facetSetup.open(session.selection));
@@ -646,14 +749,14 @@ document.querySelector('#edit-facets')!.addEventListener('click', () => facetSet
 document.querySelector('#adaptive-mode')!.addEventListener('click', () => {
   if (!session.selection) return;
   session.choosePractice(null);
-  linkedOpen = session.assisted;
+  linkedOpen = session.assisted || session.recognizingLocation;
   renderQuestion();
 });
 const renderAccountProfile = createAccountProfile(accounts);
 accounts.onchange = sessionChanged => {
   if (sessionChanged) {
     session = accounts.session;
-    linkedOpen = session.assisted;
+    linkedOpen = session.assisted || session.recognizingLocation;
     renderQuestion();
   }
   renderAccountProfile();

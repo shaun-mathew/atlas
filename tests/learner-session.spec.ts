@@ -19,6 +19,28 @@ async function seedQuestion(page: Page, countryId: string) {
   }, countryId);
 }
 
+test('an older save with an unsupported active skill keeps its history and resumes supported practice', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('atlas-practice.guest', JSON.stringify({
+      version: 6, started: true, cursor: 0,
+      current: { countryId: 'BRA', kind: 'new', assisted: false },
+      attempts: [{
+        id: 'future-skill-answer', countryId: 'BRA', skill: 'future-skill', kind: 'new',
+        boundaryVersion: 'natural-earth-5.1.2-50m', factVersion: '2026-09-07',
+        longitude: -52, latitude: -12, correct: true, assisted: false,
+        selectedCountry: 'Brazil', answeredAt: '2026-09-07T12:00:00.000Z',
+      }],
+    }));
+  });
+  await page.goto('/');
+  await expect(page.getByLabel('Practice results')).toContainText('1 answered');
+  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Name-to-location proficiency' })).toBeHidden();
+  await answerWorldPoint(page, -52, -12);
+  await expect(page.getByLabel('Practice results')).toContainText('2 answered');
+  await expect(page.getByRole('status')).toContainText('Correct');
+});
+
 test('a guest starts a country name-to-location session without an account', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();

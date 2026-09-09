@@ -98,6 +98,88 @@ test('attaching guest history preserves versioned proficiency and continues adap
   await expect(page.locator('#review-at')).toHaveAttribute('datetime', '2026-09-07T12:00:00.000Z');
 });
 
+test('recognition guest attachment preserves selected identity and a legacy recall review for the same country', async ({ page, request, baseURL, browser }) => {
+  await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
+  const username = `recognition-${crypto.randomUUID().slice(0, 16)}`;
+  const registered = await request.post('/api/register', {
+    headers: { Origin: baseURL! },
+    data: {
+      username, password: 'a sufficiently long password',
+      progress: {
+        version: 6, started: true, cursor: 1,
+        current: { countryId: 'BRA', kind: 'review', assisted: false },
+        attempts: [{
+          id: 'legacy-recall', countryId: 'BRA', skill: 'name-to-location', kind: 'new',
+          boundaryVersion: 'natural-earth-5.1.2-50m', factVersion: '2026-09-07',
+          longitude: -52, latitude: -12, correct: true, assisted: false,
+          selectedCountry: 'Brazil', answeredAt: '2026-09-06T12:00:00.000Z',
+        }],
+      },
+    },
+  });
+  expect(registered.status()).toBe(201);
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Custom practice', exact: true }).click();
+  const setup = page.getByRole('dialog', { name: 'Custom practice setup' });
+  await setup.getByRole('button', { name: '3 Learning' }).click();
+  await setup.getByRole('radio', { name: 'Location-to-name recognition', exact: true }).check();
+  await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
+  const search = page.getByRole('combobox', { name: 'Search countries & territories' });
+  await search.fill('Argentina');
+  await page.getByRole('option', { name: 'Argentina', exact: true }).click();
+  await page.getByRole('button', { name: 'Check country' }).click();
+  await page.getByRole('button', { name: 'Profile', exact: true }).click();
+  const profile = page.getByRole('dialog', { name: 'Your profile' });
+  await profile.getByLabel('Username', { exact: true }).fill(username);
+  await profile.getByLabel('Password', { exact: true }).fill('a sufficiently long password');
+  await profile.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(profile).toContainText(`Signed in as ${username}`);
+  await profile.getByRole('button', { name: 'Close', exact: true }).click();
+  await page.reload();
+  await expect(page.getByRole('status')).toContainText('You selected Argentina');
+  await expect(page.getByRole('region', { name: 'Country fact card' })).toContainText('Brazil');
+  const recognition = page.getByRole('region', { name: 'Location-to-name recognition proficiency' });
+  await expect(recognition).toContainText('Learning');
+  await expect(recognition.locator('time')).toHaveAttribute('datetime', '2026-09-08T12:10:00.000Z');
+  await page.getByRole('button', { name: 'Recommended practice', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
+  await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
+  const recall = page.getByRole('region', { name: 'Name-to-location proficiency' });
+  await expect(recall.locator('time')).toHaveAttribute('datetime', '2026-09-07T12:00:00.000Z');
+  await answerWorldPoint(page, -52, -12);
+  await expect(recall).toContainText('Retained');
+  await expect(recall.locator('time')).toHaveAttribute('datetime', '2026-09-11T12:00:00.000Z');
+  await page.clock.setFixedTime(new Date('2026-09-08T12:10:00Z'));
+  await page.getByRole('button', { name: 'Custom practice', exact: true }).click();
+  await setup.getByRole('button', { name: '3 Learning' }).click();
+  await setup.getByRole('radio', { name: 'Location-to-name recognition', exact: true }).check();
+  await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
+  await search.fill('Brazil');
+  await page.getByRole('option', { name: 'Brazil', exact: true }).click();
+  await page.getByRole('button', { name: 'Check country' }).click();
+  await page.getByRole('button', { name: 'Profile', exact: true }).click();
+  await expect(profile.getByRole('status')).toContainText('Progress synced');
+  const device = await browser.newContext();
+  try {
+    const other = await device.newPage();
+    await other.goto('/');
+    await other.getByRole('button', { name: 'Profile', exact: true }).click();
+    const otherProfile = other.getByRole('dialog', { name: 'Your profile' });
+    await otherProfile.getByLabel('Username', { exact: true }).fill(username);
+    await otherProfile.getByLabel('Password', { exact: true }).fill('a sufficiently long password');
+    await otherProfile.getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(otherProfile).toContainText(`Signed in as ${username}`);
+    await otherProfile.getByRole('button', { name: 'Close', exact: true }).click();
+    await expect(other.getByRole('status')).toContainText('You selected Brazil');
+    const resumed = other.getByRole('region', { name: 'Location-to-name recognition proficiency' });
+    await expect(resumed).toContainText('Familiar');
+    await expect(resumed.locator('time')).toHaveAttribute('datetime', '2026-09-09T12:10:00.000Z');
+    await expect(other.getByLabel('Practice results')).toContainText('4 answered');
+  } finally {
+    await device.close();
+  }
+});
+
 test('failed authentication keeps guest learning and offline account answers sync after reload', async ({ page, context }) => {
   const username = `offline-${crypto.randomUUID().slice(0, 20)}`;
   await page.goto('/');

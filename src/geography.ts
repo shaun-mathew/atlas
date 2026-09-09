@@ -10,6 +10,38 @@ export type Country = Feature<Polygon | MultiPolygon, { id: string; name: string
 // Natural Earth's de facto boundaries. Names and inclusion do not imply recognition.
 export const countries = (data as FeatureCollection<Polygon | MultiPolygon, Country['properties']>).features;
 
+// Search aliases are explicit content, not a spelling or fuzzy-grading rule.
+// The selected entity ID remains the answer regardless of the search term.
+const countryAliases: Record<string, readonly string[]> = {
+  ALD: ['Aland Islands'],
+  CIV: ["Côte d'Ivoire"],
+  COD: ['DR Congo', 'DRC', 'Congo Kinshasa'],
+  COG: ['Congo Brazzaville'],
+  CZE: ['Czechia'],
+  GBR: ['UK', 'Great Britain'],
+  KOR: ['Republic of Korea'],
+  MMR: ['Burma'],
+  PRK: ["Democratic People's Republic of Korea", 'DPRK'],
+  RUS: ['Russian Federation'],
+  SWZ: ['Swaziland'],
+  TLS: ['Timor-Leste'],
+  TUR: ['Türkiye'],
+  USA: ['United States', 'US', 'USA'],
+};
+
+export function normalizeCountrySearch(value: string): string {
+  return value.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+const countrySearchTerms: Record<string, string[]> = Object.fromEntries(countries.map(country => [
+  country.properties.id,
+  [country.properties.name, ...(countryAliases[country.properties.id] ?? [])].map(normalizeCountrySearch),
+]));
+
+export function matchesCountrySearch(country: Country, normalizedQuery: string): boolean {
+  return countrySearchTerms[country.properties.id].some(term => term.includes(normalizedQuery));
+}
+
 const radians = Math.PI / 180;
 const polygonAreas = new WeakMap<Polygon['coordinates'], number>();
 

@@ -37,6 +37,7 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
             <p class="facet-description">Practice a spatial skill, or slow down with country facts.</p>
             <fieldset class="facet-learning"><legend class="facet-note">Available learning options</legend>
               <label class="facet-choice"><input type="radio" name="learning" value="name-to-location" aria-label="Name-to-location" checked><span><strong>Name-to-location</strong><small>Find a named country on the map or globe.</small></span></label>
+              <label class="facet-choice"><input type="radio" name="learning" value="location-to-name-recognition" aria-label="Location-to-name recognition"><span><strong>Location-to-name recognition</strong><small>Name the highlighted country by selecting a search result. This skill has its own reviews.</small></span></label>
               <label class="facet-choice"><input type="radio" name="learning" value="country-facts" aria-label="Country fact cards"><span><strong>Country fact cards</strong><small>Read sourced facts. Reading is not scored and does not reschedule reviews.</small></span></label>
             </fieldset>
           </section>

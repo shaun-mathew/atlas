@@ -130,6 +130,8 @@ export class LinkedMaps {
   private frame?: Frame;
   private active = false;
   private answered = false;
+  private hideTargetName = false;
+  private selectable = true;
   private needsRecenter = false;
   private animateRecenter = false;
   private resizing = false;
@@ -163,7 +165,7 @@ export class LinkedMaps {
     });
   }
 
-  show(country: Country, answer?: Answer): void {
+  show(country: Country, answer?: Answer, options: { hideTargetName?: boolean; selectable?: boolean } = {}): void {
     const changed = this.country?.properties.id !== country.properties.id;
     this.needsRecenter ||= !this.active || changed || !!answer;
     this.animateRecenter = this.active && (changed || !!answer);
@@ -184,6 +186,14 @@ export class LinkedMaps {
     this.country = country;
     this.frame = frameFor(country);
     this.answered = !!answer;
+    this.hideTargetName = options.hideTargetName ?? false;
+    this.selectable = options.selectable ?? true;
+    if (this.hideTargetName) {
+      for (const labels of [this.overviewLabels, this.detailLabels]) {
+        labels.get(country.properties.id)?.marker.remove();
+        labels.delete(country.properties.id);
+      }
+    }
     if (!this.detail) {
       this.detail = L.map(this.detailContainer, {
         minZoom: 1, maxZoom: 16, zoomSnap: 0.25, zoomControl: false,
@@ -332,7 +342,7 @@ export class LinkedMaps {
   };
 
   private select = (event: L.LeafletMouseEvent): void => {
-    if (!this.active || this.answered || !this.detail) return;
+    if (!this.active || this.answered || !this.selectable || !this.detail) return;
     const visible = this.visiblePoint(this.detail, event.containerPoint);
     if (Math.abs(visible.lat) > 85) return;
     const point = visible.wrap();
@@ -484,6 +494,7 @@ export class LinkedMaps {
       const shift = shiftFor(part, longitude);
       if (!intersects(part, shift, bounds)) continue;
       const id = part.country.properties.id;
+      if (this.hideTargetName && id === this.country?.properties.id) continue;
       const previous = candidates.get(id);
       const existing = labels.get(id);
       // Keep the same island/territory while it is still in view.
