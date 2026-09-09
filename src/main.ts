@@ -116,6 +116,32 @@ const accounts = new Accounts();
 await accounts.initialize();
 let session = accounts.session;
 const panel = document.querySelector<HTMLDivElement>('.session-panel')!;
+const countryName = document.querySelector<HTMLElement>('#country')!;
+const countryHeading = countryName.parentElement!;
+
+function fitCountryHeading() {
+  countryHeading.style.removeProperty('font-size');
+  if (!countryName.firstChild || !countryHeading.getClientRects().length) return;
+  const availableWidth = countryHeading.parentElement!.clientWidth;
+  if (!availableWidth) return;
+  const fontSize = parseFloat(getComputedStyle(countryHeading).fontSize);
+
+  // Measure intact words, including the final question mark, at the CSS size.
+  // Multi-word names may wrap at spaces; only oversized words shrink the type.
+  let widestWord = 0;
+  const punctuationWidth = countryHeading.lastElementChild!.getBoundingClientRect().width;
+  for (let word = countryName.firstElementChild; word; word = word.nextElementSibling) {
+    const width = word.getBoundingClientRect().width
+      + (word === countryName.lastElementChild ? punctuationWidth : 0);
+    widestWord = Math.max(widestWord, width);
+  }
+  if (widestWord > availableWidth) {
+    countryHeading.style.fontSize = `${Math.floor(fontSize * availableWidth / widestWord)}px`;
+  }
+}
+const headingSize = new ResizeObserver(fitCountryHeading);
+headingSize.observe(panel);
+window.addEventListener('resize', fitCountryHeading);
 const header = document.querySelector<HTMLElement>('.app-header')!;
 const progress = document.querySelector<HTMLParagraphElement>('#progress')!;
 const feedback = document.querySelector<HTMLDivElement>('#feedback')!;
@@ -413,7 +439,13 @@ function renderQuestion(animate = true) {
   map.getContainer().setAttribute('aria-label', showLinked ? 'Regional overview' : 'World map');
   if (!showLinked) linkedMaps.hide();
   document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
-  document.querySelector('#country')!.textContent = country?.properties.name ?? '';
+  countryName.replaceChildren();
+  for (const word of country?.properties.name.split(' ') ?? []) {
+    if (countryName.firstChild) countryName.append(' ');
+    const part = document.createElement('span');
+    part.textContent = word;
+    countryName.append(part);
+  }
   document.querySelector('#question-kind')!.textContent = reading ? 'Country fact cards' : session.questionKind ? questionLabels[session.questionKind] : '';
   document.querySelector('#question-number')!.textContent = reading ? 'Reading' : `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
   document.querySelector('#answered-count')!.textContent = String(session.attempts.length);
@@ -480,6 +512,7 @@ function renderQuestion(animate = true) {
       feedback.prepend(flag);
     }
   }
+  fitCountryHeading();
   // Finish the panel and surface layout before measuring a destination or
   // starting travel. invalidateSize must not refocus the previous answer.
   if (!showLinked) map.invalidateSize({ pan: false, animate: false });

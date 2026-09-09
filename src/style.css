@@ -34,6 +34,8 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .fact-card:focus-v
 #question-number { margin-left: auto; color: #dce4e5; letter-spacing: 0; }
 .prompt { margin: 30px 0 4px; font-size: 22px; font-weight: 400; color: #c0cdd2; letter-spacing: -0.6px; }
 h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-height: 1.1; letter-spacing: -3.5px; overflow-wrap: anywhere; }
+#session h1 { overflow-wrap: normal; }
+#country > span { white-space: nowrap; }
 #welcome h1 { margin-top: 26px; }
 .accent { color: var(--accent); }
 .answer-dock { margin-top: 24px; padding: 18px; border: 1px solid #ffffff20; border-radius: 16px; background: #14242ef5; box-shadow: 0 14px 36px #00000029, inset 0 1px 0 #ffffff06; }
