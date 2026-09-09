@@ -6,6 +6,7 @@
   "engines": { "node": ">=24.15.0" },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "prototype:cities": "CITY_PROTOTYPE=1 vite --host 127.0.0.1 --port 5176 --open '/?variant=A'",
     "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "build": "npm run typecheck && vite build",

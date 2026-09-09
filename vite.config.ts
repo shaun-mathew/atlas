@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [{
     name: 'account-api',
     async configureServer(vite) {
+      if (process.env.CITY_PROTOTYPE === '1') return; // Throwaway UI: no account API or database.
       const api = await createAccountServer({
         databasePath: process.env.DATABASE_PATH ?? 'data/accounts.sqlite',
         baseURL: process.env.APP_ORIGIN ?? `http://127.0.0.1:${vite.config.server.port}`,
