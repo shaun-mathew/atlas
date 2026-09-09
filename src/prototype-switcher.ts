@@ -1,7 +1,7 @@
 // Throwaway development-only UI; not a production navigation component.
 export function PrototypeSwitcher(current: string, change: (key: string) => void) {
-  const variants = ['A', 'B', 'C'];
-  const names = ['Mixed practice', 'City lab', 'Geography tracks'];
+  const variants = ['A', 'B', 'C', 'D'];
+  const names = ['Mixed practice', 'City lab', 'Geography tracks', 'Tracks + borders'];
   const bar = document.createElement('nav');
   bar.className = 'prototype-switcher';
   bar.setAttribute('aria-label', 'Prototype variants');

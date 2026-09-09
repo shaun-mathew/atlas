@@ -21,6 +21,8 @@
 .cp-map-tools { display: flex; align-items: center; gap: 8px; padding: 12px 16px; flex-wrap: wrap; border-bottom: 1px solid #ffffff18; z-index: 401; background: #14242e; }
 .cp-map-tools label { display: flex; gap: 10px; align-items: center; margin-right: auto; color: #aab8bf; font: 11px ui-monospace, monospace; }
 .cp-map-tools .secondary { min-height: 34px; font-size: 11px; }
+.cp-map-tools .cp-border-toggle { flex-basis: auto; margin-right: 0; min-height: 34px; white-space: nowrap; cursor: pointer; }
+.cp-border-toggle input { accent-color: #d6ed8b; width: 16px; height: 16px; margin: 0; }
 #cp-map { flex: 1; min-height: 180px; width: 100%; background: #111e29; cursor: crosshair; }
 .cp-map-caption { padding: 8px 15px; color: #b6cbd5; font: 10px/1.4 ui-monospace, monospace; background: #14242e; min-height: 30px; }
 .city-prototype .leaflet-control-zoom a { color: #dce4df; background: #1c303f; border-color: #526574; }
