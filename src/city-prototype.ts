@@ -1,4 +1,4 @@
-// THROWAWAY: Four city-testing variants on /?variant=A|B|C|D.
+// THROWAWAY: Two sets of four city-testing variants on /?variant=A–H.
 // Question: one learning flow, a separate city test, or geography tracks—and what map detail is enough?
 // No accounts, scheduling, persistence, or production assessment policy. Thresholds are experimental.
 import L from 'leaflet';
@@ -12,16 +12,28 @@ import data from './data/city-prototype.json';
 import { PrototypeSwitcher } from './prototype-switcher';
 
 type Track = 'countries' | 'cities' | 'rivers';
-type Detail = 'outlines' | 'rivers' | 'detailed';
+type Detail = 'outlines' | 'rivers' | 'detailed' | 'land';
 type City = typeof data.cities[number];
 type Question = { kind: Track; name: string; city: City; countryId: string };
-type Attempt = { name: string; kind: Track; distanceKm: number | null; correct: boolean; assisted: boolean; detail: Detail; borders: boolean };
+type Attempt = { name: string; kind: Track; distanceKm: number | null; correct: boolean; assisted: boolean; detail: Detail; borders: boolean; step: number; restoredContext: boolean };
 const app = document.querySelector<HTMLElement>('#app')!;
 const rivers = data.rivers as FeatureCollection<LineString | MultiLineString>;
 const countryViews: Record<string, L.LatLngBoundsExpression> = {
   FRA: [[41, -5], [51.5, 10]], EGY: [[21.5, 24], [32, 37]], JPN: [[30, 128], [46, 146]],
   BRA: [[-34, -74], [6, -34]], KEN: [[-5, 33], [5, 42]], AUS: [[-44, 112], [-10, 154]],
 };
+const trackVariants: Record<string, boolean> = { C:true, D:true, H:true };
+const borderVariants: Record<string, boolean> = { D:true, G:true, H:true };
+const cairo = data.cities.find(city => city.name === 'Cairo')!;
+const nairobi = data.cities.find(city => city.name === 'Nairobi')!;
+const circuit: { city: City; kind: Track; relationship: string }[] = [
+  { city:cairo, kind:'countries', relationship:'Egypt links the Mediterranean coast to the Nile valley.' },
+  { city:cairo, kind:'cities', relationship:'Cairo sits near the head of the Nile delta in Egypt.' },
+  { city:cairo, kind:'rivers', relationship:'The Nile crosses Egypt; its course connects places across national borders.' },
+  { city:nairobi, kind:'countries', relationship:'Kenya lies farther south in East Africa, on the Indian Ocean.' },
+  { city:nairobi, kind:'cities', relationship:'Nairobi is inland in the Kenyan highlands, not on the coast.' },
+];
+const circuitBounds: L.LatLngBoundsExpression = [[-7,22],[34,43]];
 let variant = 'A';
 let track: Track = 'cities';
 let detail: Detail = 'outlines';
@@ -30,6 +42,7 @@ let index = 0;
 let tolerance = 100;
 let assisted = false;
 let answered = false;
+let restoredContext = false;
 let selection: L.LatLng | undefined;
 let attempts: Attempt[] = [];
 let map: L.Map;
@@ -48,11 +61,15 @@ const mapSize = new ResizeObserver(() => {
 });
 
 function question(): Question {
-  const city = data.cities[index % data.cities.length];
-  const kind = variant === 'A' ? (index % 3 === 1 ? 'countries' : 'cities') : variant === 'B' ? 'cities' : track;
+  const cityIndex = variant === 'E' ? Math.floor(index/2) : variant === 'G' ? Math.floor(index/3) : index;
+  const city = variant === 'F' ? circuit[index % circuit.length].city : data.cities[cityIndex % data.cities.length];
+  const kind: Track = variant === 'A' ? (index % 3 === 1 ? 'countries' : 'cities')
+    : variant === 'E' ? (index % 2 === 0 ? 'countries' : 'cities')
+    : variant === 'F' ? circuit[index % circuit.length].kind
+    : variant === 'B' || variant === 'G' ? 'cities' : track;
   return { kind, name: kind === 'cities' ? city.name : kind === 'countries' ? city.country : 'Nile', city, countryId: city.countryId };
 }
-const mapTools = () => `<div class="cp-map-tools"><label>Map detail<select id="cp-detail"><option value="outlines">Current · country outlines</option><option value="rivers">Physical · outlines + rivers</option><option value="detailed">Local · satellite, no labels</option></select></label>${variant === 'D' ? '<label class="cp-border-toggle"><input id="cp-borders" type="checkbox" checked> Country borders</label>' : ''}<button class="secondary" id="cp-world">World</button><button class="secondary" id="cp-region">Regional hint</button></div><div id="cp-map" role="region" aria-label="Practice map"></div><div class="cp-map-caption" id="cp-map-caption"></div>`;
+const mapTools = () => `<div class="cp-map-tools"><label>Map detail<select id="cp-detail" ${variant === 'G' ? 'disabled' : ''}><option value="outlines">Current · country outlines</option><option value="rivers">Physical · outlines + rivers</option><option value="detailed">Local · satellite, no labels</option>${variant === 'G' ? '<option value="land">Reduced · land shape only</option>' : ''}</select></label>${variant === 'D' || variant === 'H' ? '<label class="cp-border-toggle"><input id="cp-borders" type="checkbox" checked> Country borders</label>' : ''}<button class="secondary" id="cp-world">World</button><button class="secondary" id="cp-region">${variant === 'F' ? 'Back to circuit' : 'Regional hint'}</button></div><div id="cp-map" role="region" aria-label="Practice map"></div><div class="cp-map-caption" id="cp-map-caption"></div>`;
 const questionPanel = () => `<section class="cp-question"><p class="eyebrow" id="cp-kind"></p><p class="prompt">Where is</p><h1 id="cp-name"></h1><p id="cp-instruction"></p><label class="cp-tolerance">City tolerance <select id="cp-tolerance"><option value="25">25 km · precise</option><option value="100">100 km · regional</option><option value="250">250 km · broad</option></select></label><div class="cp-answer"><p id="cp-selection" aria-live="polite">Click the map to place your answer.</p><div id="cp-feedback" role="status" aria-live="polite"></div><button id="cp-check" class="primary" disabled>Check location <span>→</span></button><button id="cp-next" class="primary" hidden>Next learning item <span>→</span></button><button id="cp-reveal" class="secondary">Reveal & learn</button></div><p id="cp-guidance"></p></section>`;
 const cityPicker = () => `<label class="cp-picker">Try a city<select id="cp-city">${data.cities.map((c,i)=>`<option value="${i}">${c.name} · ${c.country}</option>`).join('')}</select></label>`;
 
@@ -70,6 +87,22 @@ export function VariantD() {
   return `<div class="cp-tracks"><aside class="cp-track-sidebar"><p class="cp-kicker">D / Geography tracks + borders</p><h2>See the land.<br>Keep your bearings.</h2><p class="cp-premise">Satellite detail with country borders on top. Keep physical clues and political context together, without city labels.</p><nav aria-label="Geography track"><button data-track="countries"><b>01</b><span>Countries<small>Select inside a boundary</small></span></button><button data-track="cities"><b>02</b><span>Cities<small>Place a point · measure distance</small></span></button><button data-track="rivers"><b>03</b><span>Rivers<small>Select along a course</small></span></button></nav>${cityPicker()}<p class="cp-tradeoff">Toggle country borders without moving the map or losing your pin. Borders use the current 1:50m geometry; zooming adds imagery detail, not finer boundaries.</p></aside><div class="cp-track-main"><section class="cp-map-stage">${mapTools()}</section><div class="cp-track-question">${questionPanel()}</div></div></div>`;
 }
 
+export function VariantE() {
+  return `<div class="cp-pair"><header class="cp-flow-heading"><div><p class="cp-kicker">E / Country → city</p><h2>Find the country. Then go closer.</h2><p class="cp-premise">Two separate answers, one geographic relationship. The city stage follows the real country—even after a miss.</p></div>${cityPicker()}</header><div class="cp-pair-workspace"><aside><ol class="cp-steps"><li data-step="0">01 · Country on the world map</li><li data-step="1">02 · City within its region</li></ol><p id="cp-flow-stage" class="cp-stage-note"></p>${questionPanel()}<p class="cp-tradeoff">Country and city answers stay separate. The close-up is guided practice, not independent world-scale recall.</p></aside><section class="cp-map-stage">${mapTools()}</section></div></div>`;
+}
+
+export function VariantF() {
+  return `<div class="cp-circuit"><header class="cp-flow-heading"><div><p class="cp-kicker">F / Regional circuit</p><h2>The Nile & East Africa.</h2><p class="cp-premise">Five connected stops. Countries, cities and a river share one regional canvas; your viewport stays where you leave it.</p></div><p id="cp-flow-stage" class="cp-stage-note"></p></header><ol class="cp-circuit-stops">${circuit.map((step,i)=>`<li data-step="${i}"><small>${step.kind}</small>${step.kind === 'cities' ? step.city.name : step.kind === 'countries' ? step.city.country : 'Nile'}</li>`).join('')}</ol><section class="cp-map-stage">${mapTools()}</section><div class="cp-track-question">${questionPanel()}<p id="cp-relationship" class="cp-relationship"></p></div></div>`;
+}
+
+export function VariantG() {
+  return `<div class="cp-fading"><aside><p class="cp-kicker">G / Fading context</p><h2>Keep the place.<br>Lose the clues.</h2><p class="cp-premise">Try each city three times with progressively less context. The regional frame stays the same; these are immediate practice repetitions.</p>${cityPicker()}<ol class="cp-steps"><li data-step="0">01 · Rivers + borders</li><li data-step="1">02 · Borders only</li><li data-step="2">03 · Land shape only</li></ol><p id="cp-flow-stage" class="cp-stage-note"></p><button class="secondary" id="cp-restore">Restore rivers + borders</button><p class="cp-tradeoff">Context fades after each attempt, not after demonstrated mastery. Restoring clues is recorded; none of these repetitions earns retention credit.</p></aside><div class="cp-track-main"><section class="cp-map-stage">${mapTools()}</section><div class="cp-track-question">${questionPanel()}</div></div></div>`;
+}
+
+export function VariantH() {
+  return `<div class="cp-tracks cp-linked-tracks"><aside class="cp-track-sidebar"><p class="cp-kicker">H / Overview + close-up</p><h2>Zoom in.<br>Stay oriented.</h2><p class="cp-premise">D's bordered imagery, with a regional overview that stays put while the main map moves.</p><nav aria-label="Geography track"><button data-track="countries"><b>01</b><span>Countries<small>Select inside a boundary</small></span></button><button data-track="cities"><b>02</b><span>Cities<small>Place a point · measure distance</small></span></button><button data-track="rivers"><b>03</b><span>Rivers<small>Select along a course</small></span></button></nav>${cityPicker()}<section class="cp-overview-card"><p class="eyebrow">Regional overview</p><div id="cp-overview" role="region" aria-label="Regional overview"></div><p>Green box = main-map viewport. No answer markers are shown here.</p></section></aside><div class="cp-track-main"><section class="cp-map-stage">${mapTools()}</section><div class="cp-track-question">${questionPanel()}</div></div></div>`;
+}
+
 function renderVariant(key: string) {
   cleanupSwitcher?.();
   mapSize.disconnect();
@@ -77,13 +110,15 @@ function renderVariant(key: string) {
   overview = undefined;
   viewport = undefined;
   map?.remove();
-  variant = ['A','B','C','D'].includes(key) ? key : 'A';
+  variant = ['A','B','C','D','E','F','G','H'].includes(key) ? key : 'A';
   const url = new URL(location.href); url.searchParams.set('variant', variant); history.replaceState(null, '', url);
   index = 0; attempts = []; track = 'cities';
-  detail = variant === 'A' ? 'outlines' : variant === 'D' ? 'detailed' : 'rivers';
-  showBorders = variant === 'D';
+  detail = variant === 'A' || variant === 'E' ? 'outlines' : variant === 'D' || variant === 'H' ? 'detailed' : 'rivers';
+  showBorders = borderVariants[variant];
+  restoredContext = false;
   app.className = `city-prototype cp-variant-${variant}`;
-  app.innerHTML = `<header class="cp-header"><a class="brand" href="/?variant=${variant}" aria-label="Atlas prototype home"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="13" stroke="currentColor"/><path d="m21 10-3 9-8 3 3-9 8-3Z" stroke="currentColor"/></svg><span>Atlas<span class="brand-subtitle">A little further, every day.</span></span></a><div class="cp-header-context">${variant === 'A' ? 'Recommended practice / Mixed sample' : variant === 'B' ? 'Custom practice / Major cities' : 'Custom practice / Geography tracks'}</div><span class="cp-memory">Prototype · nothing saved</span></header><div class="cp-body">${variant === 'A' ? VariantA() : variant === 'B' ? VariantB() : variant === 'C' ? VariantC() : VariantD()}</div><footer class="cp-observatory"><span id="cp-results"></span><button id="cp-reset">Reset experiment</button><details id="cp-state"><summary>Live experiment state</summary><pre></pre></details></footer>`;
+  const renderers: Record<string, () => string> = {A:VariantA,B:VariantB,C:VariantC,D:VariantD,E:VariantE,F:VariantF,G:VariantG,H:VariantH};
+  app.innerHTML = `<header class="cp-header"><a class="brand" href="/?variant=${variant}" aria-label="Atlas prototype home"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><circle cx="16" cy="16" r="13" stroke="currentColor"/><path d="m21 10-3 9-8 3 3-9 8-3Z" stroke="currentColor"/></svg><span>Atlas<span class="brand-subtitle">A little further, every day.</span></span></a><div class="cp-header-context">${variant === 'A' ? 'Recommended practice / Mixed sample' : trackVariants[variant] ? 'Custom practice / Geography tracks' : 'Custom practice / Learning-flow experiments'}</div><span class="cp-memory">Prototype · nothing saved</span></header><div class="cp-body">${renderers[variant]()}</div><footer class="cp-observatory"><span id="cp-results"></span><button id="cp-reset">Reset experiment</button><details id="cp-state"><summary>Live experiment state</summary><pre></pre></details></footer>`;
   map = L.map('cp-map', { minZoom: 1, maxZoom: 14, worldCopyJump: true, zoomControl: false }).setView([20,0], 2);
   L.control.zoom({ position: 'topright' }).addTo(map);
   L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
@@ -91,14 +126,14 @@ function renderVariant(key: string) {
   layers = L.layerGroup().addTo(map);
   marks = L.layerGroup().addTo(map);
   borderLayer = undefined;
-  if (variant === 'D') {
+  if (borderVariants[variant]) {
     // Context sits above tiles and land fill, but below answer markers and paths.
     map.createPane('prototypeBase').style.zIndex = '300';
     map.createPane('prototypeBorders').style.zIndex = '350';
     const borderStyle: L.PolylineOptions = { pane:'prototypeBorders', smoothFactor:0, color:'#ffe7a3', weight:1.2, opacity:0.95, fill:false };
     borderLayer = L.geoJSON(countries, { style:borderStyle, interactive:false }).addTo(map);
   }
-  if (variant === 'B') {
+  if (variant === 'B' || variant === 'H') {
     overview = L.map('cp-overview', { zoomControl: false, attributionControl: false, dragging: false, scrollWheelZoom: false, doubleClickZoom: false, touchZoom: false, keyboard: false, boxZoom: false }).setView([20,0], 1);
     L.geoJSON(countries, { style: { color:'#71868c', weight:0.6, fillColor:'#334c57', fillOpacity:1 }, interactive:false }).addTo(overview);
     viewport = L.rectangle(map.getBounds(), { color:'#d6ed8b', weight:1, fillOpacity:0.12, interactive:false }).addTo(overview);
@@ -126,10 +161,18 @@ function renderVariant(key: string) {
   document.querySelector('#cp-reveal')!.addEventListener('click',()=>submit(true));
   document.querySelector('#cp-next')!.addEventListener('click',()=>{ index++; beginQuestion(); });
   document.querySelector('#cp-reset')!.addEventListener('click',()=>renderVariant(variant));
-  document.querySelector<HTMLSelectElement>('#cp-city')?.addEventListener('change',event=>{ index = Number((event.target as HTMLSelectElement).value); beginQuestion(); });
+  document.querySelector<HTMLSelectElement>('#cp-city')?.addEventListener('change',event=>{
+    index = Number((event.target as HTMLSelectElement).value) * (variant === 'E' ? 2 : variant === 'G' ? 3 : 1);
+    beginQuestion();
+  });
+  document.querySelector('#cp-restore')?.addEventListener('click', () => {
+    restoredContext = true; detail = 'rivers'; showBorders = true;
+    borderLayer!.addTo(map);
+    drawBase(); renderQuestionText(); surfaceState();
+  });
   document.querySelectorAll<HTMLButtonElement>('[data-track]').forEach(button=>button.onclick=()=>{
     track = button.dataset.track as Track;
-    detail = variant === 'D' ? 'detailed' : track === 'countries' ? 'outlines' : 'rivers';
+    detail = variant === 'D' || variant === 'H' ? 'detailed' : track === 'countries' ? 'outlines' : 'rivers';
     beginQuestion();
   });
   const state = document.querySelector<HTMLDetailsElement>('#cp-state')!;
@@ -145,7 +188,7 @@ function renderVariant(key: string) {
 function drawBase() {
   layers.clearLayers(); tileErrors = 0; tilesLoaded = 0;
   document.querySelector<HTMLSelectElement>('#cp-detail')!.value = detail;
-  const boundaryStyle: L.PolylineOptions = { pane:variant === 'D' ? 'prototypeBase' : 'overlayPane', smoothFactor:0, color:'#63777f', weight:variant === 'D' ? 0 : 0.8, fillColor:'#334c57', fillOpacity:1 };
+  const boundaryStyle: L.PolylineOptions = { pane:borderVariants[variant] ? 'prototypeBase' : 'overlayPane', smoothFactor:0, color:'#63777f', weight:borderVariants[variant] ? 0 : 0.8, fillColor:'#334c57', fillOpacity:1 };
   if (detail !== 'detailed') L.geoJSON(countries, { style: boundaryStyle, interactive:false }).addTo(layers);
   if (detail === 'rivers') L.geoJSON(rivers, { style:{ color:'#71b9d9', weight:1.5, opacity:0.8 }, interactive:false }).addTo(layers);
   if (detail === 'detailed') {
@@ -159,13 +202,22 @@ function drawBase() {
 }
 function fitRegion() {
   const q = question();
-  const bounds: L.LatLngBoundsExpression = q.kind === 'rivers' ? [[-4,24],[33,40]] : countryViews[q.countryId];
+  const bounds: L.LatLngBoundsExpression = variant === 'F' ? circuitBounds : q.kind === 'rivers' ? [[-4,24],[33,40]] : countryViews[q.countryId];
   map.fitBounds(bounds, { padding:[35,35], animate:false });
   overview?.fitBounds(bounds, { padding:[20,20], animate:false });
 }
 function beginQuestion() {
   selection = undefined; answered = false;
-  assisted = variant === 'B' || ((variant === 'C' || variant === 'D') && track !== 'countries');
+  const q = question();
+  restoredContext = false;
+  if (variant === 'G') {
+    detail = index % 3 === 0 ? 'rivers' : index % 3 === 1 ? 'outlines' : 'land';
+    showBorders = index % 3 < 2;
+    if (showBorders) borderLayer!.addTo(map); else borderLayer!.remove();
+  }
+  if (variant === 'E') detail = q.kind === 'countries' ? 'outlines' : 'rivers';
+  assisted = variant === 'B' || (trackVariants[variant] && track !== 'countries')
+    || (variant === 'E' && q.kind === 'cities') || variant === 'F' || variant === 'G';
   marks.clearLayers();
   document.querySelector('#cp-feedback')!.innerHTML = '';
   document.querySelector('#cp-selection')!.textContent = 'Click the map to place your answer.';
@@ -175,9 +227,16 @@ function beginQuestion() {
   document.querySelector<HTMLButtonElement>('#cp-next')!.hidden = true;
   document.querySelector<HTMLSelectElement>('#cp-tolerance')!.disabled = false;
   const picker = document.querySelector<HTMLSelectElement>('#cp-city');
-  if (picker) { picker.value = String(index % data.cities.length); picker.closest<HTMLElement>('label')!.hidden = (variant === 'C' || variant === 'D') && track === 'rivers'; }
+  if (picker) { picker.value = String(data.cities.indexOf(q.city)); picker.closest<HTMLElement>('label')!.hidden = trackVariants[variant] && track === 'rivers'; }
   drawBase();
-  if (assisted) fitRegion(); else map.setView([20,0],2, {animate:false});
+  if (variant === 'F') {
+    if (index === 0) fitRegion();
+  } else if (assisted) {
+    fitRegion();
+  } else {
+    map.setView([20,0], map.getSize().x <= 700 ? 1 : 2, {animate:false});
+    overview?.setView([20,0],1,{animate:false});
+  }
   document.querySelectorAll<HTMLButtonElement>('[data-track]').forEach(button=>button.setAttribute('aria-pressed', String(button.dataset.track===track)));
   renderQuestionText(); surfaceState();
 }
@@ -192,6 +251,31 @@ function renderQuestionText() {
   document.querySelector<HTMLElement>('.cp-tolerance')!.hidden = q.kind !== 'cities';
   document.querySelector<HTMLSelectElement>('#cp-tolerance')!.value = String(tolerance);
   document.querySelector('#cp-guidance')!.textContent = assisted ? `Regional context given${q.kind === 'rivers' ? '' : ` · ${q.city.country}`} · guided practice, not retention.` : 'World start · no location hint used. Map detail changes context, not the distance rule.';
+  const flowStage = document.querySelector('#cp-flow-stage');
+  const stageIndex = variant === 'E' ? index % 2 : variant === 'F' ? index % circuit.length : index % 3;
+  document.querySelectorAll<HTMLElement>('[data-step]').forEach(step => {
+    const active = Number(step.dataset.step) === stageIndex;
+    step.classList.toggle('active', active);
+    if (active) step.setAttribute('aria-current', 'step'); else step.removeAttribute('aria-current');
+  });
+  if (variant === 'E') {
+    flowStage!.textContent = `Pair ${Math.floor(index/2)+1} · step ${stageIndex+1} of 2`;
+    document.querySelector('#cp-next')!.textContent = stageIndex === 0 ? 'Zoom in to the city →' : 'Next country → city pair';
+  }
+  if (variant === 'F') {
+    flowStage!.textContent = `Circuit ${Math.floor(index/circuit.length)+1} · stop ${stageIndex+1} of ${circuit.length}`;
+    document.querySelector('#cp-next')!.textContent = stageIndex === circuit.length-1 ? 'Start another circuit →' : 'Next stop, same map →';
+    document.querySelector('#cp-guidance')!.textContent = 'Fixed regional practice · mixed learning items · regional context given, not retention.';
+    document.querySelector('#cp-relationship')!.textContent = answered ? circuit[stageIndex].relationship : 'Answer to reveal how this place fits the region.';
+  }
+  if (variant === 'G') {
+    flowStage!.textContent = `Attempt ${stageIndex+1} of 3 · ${restoredContext ? 'full context restored' : ['rivers + borders','borders only','land shape only'][stageIndex]}`;
+    document.querySelector('#cp-next')!.textContent = stageIndex === 2 ? 'Next city, restore full context →' : 'Try again with fewer clues →';
+    document.querySelector('#cp-guidance')!.textContent = `Regional frame given · immediate repetition, not retention${restoredContext ? ' · clues restored for this attempt' : ''}.`;
+    const restore = document.querySelector<HTMLButtonElement>('#cp-restore')!;
+    restore.hidden = stageIndex === 0 || restoredContext;
+    restore.disabled = answered;
+  }
 }
 function riverPoint(point: L.LatLng): L.LatLng {
   // Nearest point on each segment in a local equirectangular projection, then geodesic distance.
@@ -223,7 +307,7 @@ function submit(reveal: boolean) {
     const country = countries.find(c=>c.properties.id===q.countryId)!;
     correct = !!selection && booleanPointInPolygon([selection.lng,selection.lat],country);
     L.geoJSON(country,{style:{color:'#d6ed8b',weight:2,fillOpacity:0.2},interactive:false}).addTo(marks);
-    if (reveal) fitRegion();
+    if (variant !== 'F' && (reveal || variant === 'E')) fitRegion();
   } else {
     const answer = q.kind === 'rivers' ? riverPoint(selection ?? L.latLng(30,31)) : target;
     if (selection) distanceKm = selection.distanceTo(answer)/1000;
@@ -236,10 +320,10 @@ function submit(reveal: boolean) {
     }
     L.circleMarker(answer,{radius:5,color:'#d6ed8b',fillColor:'#d6ed8b',fillOpacity:1,interactive:false}).bindTooltip(q.name,{permanent:true,direction:'top'}).addTo(marks);
     if (selection) L.polyline([selection,answer],{color:'#dfb17d',dashArray:'5 6',weight:2,interactive:false}).addTo(marks);
-    map.fitBounds(L.latLngBounds(selection ? [selection,answer] : [answer]).pad(0.3), {padding:[65,65],maxZoom:q.kind==='rivers'?5:7,animate:false});
+    if (variant !== 'F') map.fitBounds(L.latLngBounds(selection ? [selection,answer] : [answer]).pad(0.3), {padding:[65,65],maxZoom:q.kind==='rivers'?5:7,animate:false});
   }
   if (reveal) correct=false;
-  attempts.push({name:q.name,kind:q.kind,distanceKm,correct,assisted,detail,borders:variant === 'D' ? showBorders : detail !== 'detailed'});
+  attempts.push({name:q.name,kind:q.kind,distanceKm,correct,assisted,detail,borders:borderVariants[variant] ? showBorders : detail !== 'detailed',step:index,restoredContext});
   document.querySelector('#cp-feedback')!.innerHTML = `<strong>${reveal ? 'Location revealed' : correct ? 'Within the target' : 'Not quite'}${distanceKm !== null ? ` · ${Math.round(distanceKm)} km away` : ''}</strong><p>${q.kind==='cities' ? `${q.name} · ${q.city.country}${q.city.capital ? ' · national capital' : ' · major city, not the national capital'}. Green dot: canonical centre; green ring: ${tolerance} km tolerance.` : q.kind==='rivers' ? 'Green line: the mapped Nile course. The orange line joins your pin to the nearest sampled segment.' : 'Green area: the country boundary.'}</p><small>${assisted ? 'Guided practice' : 'Unassisted attempt'} · ${detail} context · no proficiency written</small>`;
   document.querySelector<HTMLButtonElement>('#cp-check')!.hidden = true;
   document.querySelector<HTMLButtonElement>('#cp-reveal')!.hidden = true;
@@ -249,13 +333,13 @@ function submit(reveal: boolean) {
 }
 function surfaceState() {
   const q=question();
-  const state = {variant,track:q.kind,question:q.name,questionDirection:'name-to-location',mapDetail:detail,borders:variant === 'D' ? showBorders : detail !== 'detailed',zoom:Number(map.getZoom().toFixed(2)),center:map.getCenter(),toleranceKm:q.kind==='cities'?tolerance:q.kind==='rivers'?80:null,assisted,answered,selection:selection??null,tilesLoaded,tileErrors,attempts,persistence:'none',scheduler:'not connected'};
+  const state = {variant,track:q.kind,question:q.name,questionDirection:'name-to-location',mapDetail:detail,borders:borderVariants[variant] ? showBorders : detail !== 'detailed',step:index,pairStage:variant==='E'?index%2+1:null,circuitStop:variant==='F'?index%circuit.length+1:null,fadingStage:variant==='G'?index%3+1:null,restoredContext,overview:overview?{center:overview.getCenter(),zoom:overview.getZoom(),viewport:map.getBounds()}:null,zoom:Number(map.getZoom().toFixed(2)),center:map.getCenter(),toleranceKm:q.kind==='cities'?tolerance:q.kind==='rivers'?80:null,assisted,answered,selection:selection??null,tilesLoaded,tileErrors,attempts,persistence:'none',scheduler:'not connected'};
   document.querySelector('#cp-state pre')!.textContent = JSON.stringify(state,null,2);
   document.querySelector('#cp-results')!.textContent = `${attempts.length} answered · ${attempts.filter(a=>a.correct).length} within target · ${attempts.filter(a=>a.assisted).length} guided`;
   const lab=document.querySelector('#cp-lab-progress');
   if(lab) lab.innerHTML=`<b>${attempts.length}</b><span>city attempts this experiment</span><small>Separate city test; no mixed queue.</small>`;
-  document.querySelector('#cp-map-caption')!.textContent = detail==='detailed' ? `Satellite imagery · no labels · urban footprints are visual hints · ${tileErrors ? `${tileErrors} tile failures: detail may be incomplete` : tilesLoaded ? 'tiles loaded' : 'loading online tiles…'}` : detail==='rivers' ? '1:50m outlines + rivers · no streets or city labels · works offline' : 'Current 1:50m country geometry · zoom adds no new detail · works offline';
-  if (variant === 'D') document.querySelector('#cp-map-caption')!.textContent += showBorders ? ' · country borders ON (1:50m)' : ' · country borders OFF';
+  document.querySelector('#cp-map-caption')!.textContent = detail==='detailed' ? `Satellite imagery · no labels · urban footprints are visual hints · ${tileErrors ? `${tileErrors} tile failures: detail may be incomplete` : tilesLoaded ? 'tiles loaded' : 'loading online tiles…'}` : detail==='land' ? 'Land shape only · no rivers or internal borders · regional frame still given' : detail==='rivers' ? '1:50m outlines + rivers · no streets or city labels · works offline' : 'Current 1:50m country geometry · zoom adds no new detail · works offline';
+  if (borderVariants[variant]) document.querySelector('#cp-map-caption')!.textContent += showBorders ? ' · country borders ON (1:50m)' : ' · country borders OFF';
   console.debug('[city prototype]',state);
 }
 renderVariant(new URLSearchParams(location.search).get('variant') ?? 'A');
