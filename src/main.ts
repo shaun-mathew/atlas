@@ -313,7 +313,7 @@ map.on('move zoom resize', drawGrid);
 drawGrid();
 
 function focusAnswer(animate = true) {
-  if (!answerPolygon || linkedOpen || globeOpen) return;
+  if (!answerPolygon || linkedOpen || globeOpen || session.feedback?.correct) return;
   const canvas = map.getContainer().getBoundingClientRect();
   const overlay = panel.getBoundingClientRect();
   const top = Math.max(header.getBoundingClientRect().bottom, progress.getBoundingClientRect().bottom) - canvas.top + 24;
@@ -540,6 +540,7 @@ next.addEventListener('click', () => {
   session.next();
   linkedOpen = false;
   renderQuestion();
+  if (globeOpen) globe?.reset();
 });
 retry.addEventListener('click', () => {
   session.retry();
