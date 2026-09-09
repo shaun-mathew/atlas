@@ -1,4 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
+import type * as GlobeModule from '../src/globe';
+import type * as GeographyModule from '../src/geography';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -204,4 +206,74 @@ test('a polar globe selection is evaluated and survives a reload', async ({ page
   await expect(page.getByText('1 answered · 0 correct', { exact: true })).toBeVisible();
   await expect(page.getByRole('status')).toContainText('Not quite');
   await expect(page.getByRole('region', { name: 'Name-to-location proficiency' })).toContainText('Learning');
+});
+
+test('changing and clearing globe highlights matches freshly rendered geography', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/');
+  const differences = await page.evaluate(async () => {
+    const globeUrl = '/src/globe.ts';
+    const geographyUrl = '/src/geography.ts';
+    // Load browser-only modules through Vite; a static Node import cannot
+    // provide the browser's DOM/WebGL constructors or resolve its asset imports.
+    const { Globe }: typeof GlobeModule = await import(/* @vite-ignore */ globeUrl);
+    const { countries }: typeof GeographyModule = await import(/* @vite-ignore */ geographyUrl);
+    const create = () => {
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;inset:0;width:480px;height:360px';
+      document.body.append(host);
+      const globe = new Globe(host, () => {}, () => { throw new Error('WebGL unavailable'); });
+      return { host, globe, canvas: host.querySelector('canvas')! };
+    };
+    const capture = (surface: { globe: GlobeModule.Globe; canvas: HTMLCanvasElement }) => {
+      surface.globe.setSelection(null);
+      const copy = document.createElement('canvas');
+      copy.width = surface.canvas.width;
+      copy.height = surface.canvas.height;
+      const context = copy.getContext('2d')!;
+      context.drawImage(surface.canvas, 0, 0);
+      return context.getImageData(0, 0, copy.width, copy.height).data;
+    };
+    const updated = create();
+    updated.globe.setVisible(true);
+    const results: { country: string; view: number; maxDifference: number }[] = [];
+    try {
+      // Large neighbors, both sides of the longitude seam, and tiny islands.
+      for (const id of ['BRA', 'CAN', 'USA', 'RUS', 'FJI', undefined]) {
+        const country = countries.find(country => country.properties.id === id);
+        const answer = { longitude: 0, latitude: 15, correct: true };
+        updated.globe.showAnswer(country, answer);
+        updated.globe.reset();
+        const fresh = create();
+        try {
+          // Set the highlight before the first upload: this is a full rendering,
+          // independent of the sequence of earlier highlights on the other globe.
+          fresh.globe.showAnswer(country, answer);
+          fresh.globe.setVisible(true);
+          for (let view = 0; view < 3; view++) {
+            const actual = capture(updated);
+            const expected = capture(fresh);
+            let maxDifference = 0;
+            for (let channel = 0; channel < actual.length; channel++) {
+              maxDifference = Math.max(maxDifference, Math.abs(actual[channel] - expected[channel]));
+            }
+            results.push({ country: id ?? 'clear', view, maxDifference });
+            for (let turn = 0; turn < 8; turn++) {
+              updated.canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+              fresh.canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight' }));
+            }
+          }
+        } finally {
+          fresh.globe.dispose();
+          fresh.host.remove();
+        }
+      }
+    } finally {
+      updated.globe.dispose();
+      updated.host.remove();
+    }
+    return results;
+  });
+  // Translated canvas paths can round antialiased edges by two channel levels.
+  for (const result of differences) expect(result.maxDifference, `${result.country}, view ${result.view}`).toBeLessThanOrEqual(2);
 });

@@ -27,6 +27,9 @@ export class Globe {
   private readonly orbitCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 20);
   private controls: OrbitControls;
   private readonly texture: THREE.CanvasTexture;
+  private readonly patchTexture = new THREE.Texture(document.createElement('canvas'));
+  private readonly atlasPolygons: { country: Country; path: Path2D; bounds: THREE.Box2 }[] = [];
+  private textureUploaded = false;
   private readonly surface: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
   private readonly pinTexture: THREE.CanvasTexture;
   private readonly pin: THREE.Sprite;
@@ -65,6 +68,31 @@ export class Globe {
     this.texture = new THREE.CanvasTexture(atlas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    this.texture.onUpdate = () => { this.textureUploaded = true; };
+    const scale = atlas.width / 360;
+    for (const country of countries) {
+      const polygons = country.geometry.type === 'Polygon' ? [country.geometry.coordinates] : country.geometry.coordinates;
+      for (const polygon of polygons) {
+        const path = new Path2D();
+        const bounds = new THREE.Box2();
+        for (const ring of polygon) {
+          ring.forEach(([longitude, latitude], index) => {
+            const x = (longitude + 180) * scale;
+            const y = (90 - latitude) * scale;
+            if (index === 0) path.moveTo(x, y);
+            else path.lineTo(x, y);
+            bounds.min.set(Math.min(bounds.min.x, x), Math.min(bounds.min.y, y));
+            bounds.max.set(Math.max(bounds.max.x, x), Math.max(bounds.max.y, y));
+          });
+          path.closePath();
+        }
+        // Include the widest highlight's miter (3px * default miterLimit / 2)
+        // and its antialiased edge, including on neighboring countries.
+        bounds.min.floor().subScalar(16).max(new THREE.Vector2());
+        bounds.max.ceil().addScalar(16).min(new THREE.Vector2(atlas.width, atlas.height));
+        this.atlasPolygons.push({ country, path, bounds });
+      }
+    }
     this.surface = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 64), new THREE.MeshBasicMaterial({ map: this.texture }));
     // Three's sphere UV seam starts on -X; the geographic seam is 180°.
     this.surface.rotation.y = -Math.PI / 2;
@@ -82,7 +110,7 @@ export class Globe {
     this.pin.renderOrder = 1;
     this.scene.add(this.surface, this.pin);
     this.pin.visible = false;
-    this.paint();
+    this.paint(atlas.getContext('2d')!);
     container.prepend(canvas);
     this.reducedMotion.addEventListener('change', this.motionPreferenceChanged);
     this.observer = new ResizeObserver(() => this.resize());
@@ -294,9 +322,8 @@ export class Globe {
     this.render();
   };
 
-  private paint() {
+  private paint(context: CanvasRenderingContext2D, region?: THREE.Box2) {
     const canvas = this.texture.image as HTMLCanvasElement;
-    const context = canvas.getContext('2d')!;
     const scale = canvas.width / 360;
     context.fillStyle = '#172d3b';
     context.fillRect(0, 0, canvas.width, canvas.height);
@@ -312,28 +339,58 @@ export class Globe {
       context.moveTo(0, y); context.lineTo(canvas.width, y);
     }
     context.stroke();
-    for (const country of countries) {
+    for (const { country, path, bounds } of this.atlasPolygons) {
+      if (region && !region.intersectsBox(bounds)) continue;
       const highlighted = country === this.highlighted;
       context.fillStyle = highlighted ? '#a2c472' : '#334c57';
       context.strokeStyle = highlighted ? '#e3f5b1' : '#63777f';
       context.lineWidth = highlighted ? 3 : 1.5;
-      const polygons = country.geometry.type === 'Polygon' ? [country.geometry.coordinates] : country.geometry.coordinates;
-      for (const polygon of polygons) {
-        context.beginPath();
-        for (const ring of polygon) {
-          ring.forEach(([longitude, latitude], index) => {
-            const x = (longitude + 180) * scale;
-            const y = (90 - latitude) * scale;
-            if (index === 0) context.moveTo(x, y);
-            else context.lineTo(x, y);
-          });
-          context.closePath();
-        }
-        context.fill('evenodd');
-        context.stroke();
-      }
+      context.fill(path, 'evenodd');
+      context.stroke(path);
     }
-    this.texture.needsUpdate = true;
+  }
+
+  private updateHighlight(previous?: Country) {
+    if (!this.textureUploaded) {
+      this.paint(this.texture.image.getContext('2d')!);
+      this.texture.needsUpdate = true;
+      return;
+    }
+    const regions: THREE.Box2[] = [];
+    for (const polygon of this.atlasPolygons) {
+      if (polygon.country !== previous && polygon.country !== this.highlighted) continue;
+      const bounds = polygon.bounds.clone();
+      // Coalesce overlapping islands before uploading. Keep disjoint regions
+      // separate, especially on opposite sides of the longitude seam.
+      for (let index = 0; index < regions.length; index++) {
+        if (!bounds.intersectsBox(regions[index])) continue;
+        bounds.union(regions[index]);
+        regions[index] = regions[regions.length - 1];
+        regions.pop();
+        index = -1;
+      }
+      regions.push(bounds);
+    }
+    const patch = this.patchTexture.image as HTMLCanvasElement;
+    const destination = new THREE.Vector2();
+    try {
+      for (let index = 0; index < regions.length; index++) {
+        const bounds = regions[index];
+        patch.width = bounds.max.x - bounds.min.x;
+        patch.height = bounds.max.y - bounds.min.y;
+        const context = patch.getContext('2d')!;
+        context.translate(-bounds.min.x, -bounds.min.y);
+        // Repaint intersecting neighbors in atlas order, not just the highlight:
+        // shared borders and overlapping islands must match a full repaint.
+        this.paint(context, bounds);
+        destination.set(bounds.min.x, this.texture.image.height - bounds.max.y);
+        // Upload only the changed pixels; regenerate the atlas mipmaps once.
+        this.texture.generateMipmaps = index === regions.length - 1;
+        this.renderer.copyTextureToTexture(this.patchTexture, this.texture, null, destination);
+      }
+    } finally {
+      this.texture.generateMipmaps = true;
+    }
   }
 
   private render = () => {
@@ -391,8 +448,9 @@ export class Globe {
   showAnswer(country?: Country, answer?: Answer) {
     if (answer) this.stopMotion();
     if (country !== this.highlighted) {
+      const previous = this.highlighted;
       this.highlighted = country;
-      this.paint();
+      this.updateHighlight(previous);
       if (country && !answer?.correct) {
         const polygons = country.geometry.type === 'Polygon' ? [country.geometry.coordinates] : country.geometry.coordinates;
         const primary = polygons.reduce((largest, polygon) => polygonArea(polygon) > polygonArea(largest) ? polygon : largest);
@@ -429,6 +487,7 @@ export class Globe {
     this.pinTexture.dispose();
     this.pin.material.dispose();
     this.texture.dispose();
+    this.patchTexture.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
