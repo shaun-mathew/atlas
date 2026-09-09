@@ -17,6 +17,7 @@ const svg = L.SVG.prototype as L.SVG & {
   _onAnimZoom(event: L.ZoomAnimEvent): void;
   _updatePaths(): void;
   _addPath(layer: ProjectedPolygon): void;
+  _updateStyle(layer: L.Polyline): void;
 };
 
 // Geography uses polylines/polygons. Pins and the linked viewport remain
@@ -26,6 +27,7 @@ export class GeographyRenderer extends L.SVG {
   declare private _zoom: number;
   declare private _container: SVGSVGElement;
   private origin?: L.Point;
+  private strokeFrame = 0;
 
   getEvents(): Record<string, L.LeafletEventHandlerFn> {
     return { ...svg.getEvents!.call(this), move: this.coverView };
@@ -35,6 +37,8 @@ export class GeographyRenderer extends L.SVG {
     if ((this._map as L.Map & { _animatingZoom?: boolean })._animatingZoom && this._bounds) return;
     this.origin = this._map.getPixelOrigin();
     svg._update.call(this);
+    cancelAnimationFrame(this.strokeFrame);
+    this._container.style.setProperty('--geography-stroke-scale', '1');
     // The map container still clips at its edges. The SVG's *old* viewport must
     // not cut off the additional geometry exposed by an animated transform.
     this._container.style.overflow = 'visible';
@@ -43,17 +47,40 @@ export class GeographyRenderer extends L.SVG {
   _onAnimZoom(event: L.ZoomAnimEvent): void {
     this.cover(event.center, event.zoom, true);
     svg._onAnimZoom.call(this, event);
+    cancelAnimationFrame(this.strokeFrame);
+    this.trackStroke();
   }
 
   _onZoom(): void {
     this.coverView();
     svg._onZoom.call(this);
+    this._container.style.setProperty('--geography-stroke-scale', String(1 / this._map.getZoomScale(this._map.getZoom(), this._zoom)));
   }
 
   private coverView = (): void => {
     if ((this._map as L.Map & { _animatingZoom?: boolean })._animatingZoom) return;
     this.cover(this._map.getCenter(), this._map.getZoom(), false);
   };
+
+  private trackStroke = (): void => {
+    // CSS zooms transform the outer SVG viewport. vector-effect cannot undo
+    // that scale; compensate using the visible, interpolated transform.
+    const matrix = this._container.getScreenCTM();
+    if (matrix) this._container.style.setProperty('--geography-stroke-scale', String(1 / Math.hypot(matrix.a, matrix.b)));
+    this.strokeFrame = requestAnimationFrame(this.trackStroke);
+  };
+
+  _updateStyle(layer: L.Polyline): void {
+    svg._updateStyle.call(this, layer);
+    const path = layer.getElement() as SVGPathElement;
+    path.style.setProperty('--geography-stroke-width', `${layer.options.weight}px`);
+  }
+
+  onRemove(map: L.Map): this {
+    cancelAnimationFrame(this.strokeFrame);
+    super.onRemove(map);
+    return this;
+  }
 
   private cover(center: L.LatLng, zoom: number, retain: boolean): void {
     if (!this.origin) return;

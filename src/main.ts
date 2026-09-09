@@ -313,7 +313,7 @@ map.on('move zoom resize', drawGrid);
 drawGrid();
 
 function focusAnswer(animate = true) {
-  if (!answerPolygon || linkedOpen || globeOpen) return;
+  if (!answerPolygon || linkedOpen || globeOpen || session.feedback?.correct) return;
   const canvas = map.getContainer().getBoundingClientRect();
   const overlay = panel.getBoundingClientRect();
   const top = Math.max(header.getBoundingClientRect().bottom, progress.getBoundingClientRect().bottom) - canvas.top + 24;
@@ -386,6 +386,7 @@ function renderFactCard(countryId: string, version: string) {
 
 function renderQuestion(animate = true) {
   stopWorldMovement();
+  answerPolygon?.getElement()?.classList.remove('answer-border');
   answerPolygon = undefined;
   const reading = session.readingFacts;
   app.classList.toggle('is-reading', reading);
@@ -497,6 +498,7 @@ function highlightCountry(countryId: string) {
     const polygon = layer as L.Polygon & { feature: Country };
     if (polygon.feature.properties.id !== countryId) return;
     polygon.setStyle({ color: '#e3f5b1', weight: 2, fillColor: '#a2c472' });
+    polygon.getElement()!.classList.add('answer-border');
     polygon.bringToFront();
     answerPolygon = polygon;
   });
@@ -538,6 +540,7 @@ next.addEventListener('click', () => {
   session.next();
   linkedOpen = false;
   renderQuestion();
+  if (globeOpen) globe?.reset();
 });
 retry.addEventListener('click', () => {
   session.retry();

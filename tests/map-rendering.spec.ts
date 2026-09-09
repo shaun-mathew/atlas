@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import type * as Leaflet from 'leaflet';
+import { selectWorldPoint } from './map-interaction';
 
 async function landDuringZoom(page: Page, mode: 'zoom-out' | 'flight' | 'arrival') {
   await page.goto('/');
@@ -112,4 +113,62 @@ test('small polygons arriving mid-flight remain filled while approaching', async
   expect(result.visibleFrames).toBeGreaterThan(0);
   expect(result.missingFrames).toBe(0);
   expect(result.settled).toEqual({ inside: true, drawn: true });
+});
+
+test('answer highlights keep their screen width through flights and button zooms', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('atlas-practice.guest', JSON.stringify({
+      version: 5, started: true, cursor: 0, attempts: [],
+      current: { countryId: 'MCO', kind: 'new', assisted: false },
+    }));
+  });
+  await page.goto('/');
+  await selectWorldPoint(page, 7.4, 43.7);
+  const widths = await page.evaluate(async () => {
+    const url = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('/deps/leaflet.js'))!;
+    // Vite's runtime URL supplies the application's own Leaflet instance.
+    const L: typeof Leaflet = (await import(/* @vite-ignore */ url)).default;
+    let map: Leaflet.Map | undefined;
+    const flyToBounds = L.Map.prototype.flyToBounds;
+    L.Map.prototype.flyToBounds = function (...args) {
+      map = this;
+      return flyToBounds.apply(this, args);
+    };
+    try {
+      document.querySelector<HTMLButtonElement>('#check')!.click();
+    } finally {
+      L.Map.prototype.flyToBounds = flyToBounds;
+    }
+    if (!map) throw new Error('Locking the answer did not start a map flight.');
+    let country: Leaflet.Polyline | undefined;
+    map.eachLayer(layer => {
+      if (layer instanceof L.Polyline && layer.feature?.properties?.id === 'MCO') country = layer;
+    });
+    const path = country!.getElement() as SVGPathElement;
+    const sample = () => {
+      const matrix = path.getScreenCTM()!;
+      const scale = Math.hypot(matrix.a, matrix.b);
+      return { scale, width: parseFloat(getComputedStyle(path).strokeWidth) * scale };
+    };
+    const duringMovement = async () => {
+      let ended = false;
+      map!.once('moveend', () => { ended = true; });
+      const frames: { scale: number; width: number }[] = [];
+      while (!ended) {
+        // Sample after all animation callbacks have prepared this frame.
+        await new Promise(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+        if (!ended) frames.push(sample());
+      }
+      return { frames, settled: sample().width };
+    };
+    const flight = await duringMovement();
+    const zoom = duringMovement();
+    document.querySelector<HTMLButtonElement>('#zoom-in')!.click();
+    return [flight, await zoom];
+  });
+  for (const { frames, settled } of widths) {
+    expect(Math.max(...frames.map(frame => frame.scale))).toBeGreaterThan(1.5);
+    expect(Math.max(...frames.map(frame => frame.width)) / settled).toBeLessThan(1.1);
+    expect(Math.min(...frames.map(frame => frame.width)) / settled).toBeGreaterThan(0.9);
+  }
 });

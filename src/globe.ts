@@ -389,10 +389,11 @@ export class Globe {
   }
 
   showAnswer(country?: Country, answer?: Answer) {
+    if (answer) this.stopMotion();
     if (country !== this.highlighted) {
       this.highlighted = country;
       this.paint();
-      if (country) {
+      if (country && !answer?.correct) {
         const polygons = country.geometry.type === 'Polygon' ? [country.geometry.coordinates] : country.geometry.coordinates;
         const primary = polygons.reduce((largest, polygon) => polygonArea(polygon) > polygonArea(largest) ? polygon : largest);
         const center = new THREE.Vector3();
