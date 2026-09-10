@@ -25,6 +25,7 @@ const countryViews: Record<string, L.LatLngBoundsExpression> = {
 const trackVariants: Record<string, boolean> = { C:true, D:true, H:true, I:true, J:true, K:true };
 const borderVariants: Record<string, boolean> = { D:true, G:true, H:true, I:true, J:true, K:true };
 const quizNavigationVariants: Record<string, boolean> = { I:true, J:true, K:true };
+const quizMapDetails: Record<Track, Detail> = { countries:'outlines', cities:'detailed', rivers:'rivers' };
 const quizTypes: { track: Track; label: string; description: string; icon: string }[] = [
   { track:'countries', label:'Countries', description:'Select inside a boundary · 6 sample countries', icon:'M4 5 10 3 16 6 21 4 20 17 14 21 8 18 3 20Z' },
   { track:'cities', label:'Cities', description:'Place a point · 6 sample cities', icon:'M3 21V10H9V21M9 21V3H16V21M16 21V13H21V21M1 21H23M12 7H13M12 11H13M12 15H13' },
@@ -75,7 +76,7 @@ function question(): Question {
     : variant === 'B' || variant === 'G' ? 'cities' : track;
   return { kind, name: kind === 'cities' ? city.name : kind === 'countries' ? city.country : 'Nile', city, countryId: city.countryId };
 }
-const mapTools = () => `<div class="cp-map-tools"><label>Map detail<select id="cp-detail" ${variant === 'G' ? 'disabled' : ''}><option value="outlines">Current · country outlines</option><option value="rivers">Physical · outlines + rivers</option><option value="detailed">Local · satellite, no labels</option>${variant === 'G' ? '<option value="land">Reduced · land shape only</option>' : ''}</select></label>${variant === 'D' || variant === 'H' ? '<label class="cp-border-toggle"><input id="cp-borders" type="checkbox" checked> Country borders</label>' : ''}<button class="secondary" id="cp-world">World</button><button class="secondary" id="cp-region">${variant === 'F' ? 'Back to circuit' : 'Regional hint'}</button></div><div id="cp-map" role="region" aria-label="Practice map"></div><div class="cp-map-caption" id="cp-map-caption"></div>`;
+const mapTools = () => `<div class="cp-map-tools">${quizNavigationVariants[variant] ? '<span id="cp-quiz-map-context" class="cp-map-context"></span>' : `<label>Map detail<select id="cp-detail" ${variant === 'G' ? 'disabled' : ''}><option value="outlines">Current · country outlines</option><option value="rivers">Physical · outlines + rivers</option><option value="detailed">Local · satellite, no labels</option>${variant === 'G' ? '<option value="land">Reduced · land shape only</option>' : ''}</select></label>`}${variant === 'D' || variant === 'H' ? '<label class="cp-border-toggle"><input id="cp-borders" type="checkbox" checked> Country borders</label>' : ''}<button class="secondary" id="cp-world">World</button><button class="secondary" id="cp-region">${variant === 'F' ? 'Back to circuit' : 'Regional hint'}</button></div><div id="cp-map" role="region" aria-label="Practice map"></div><div class="cp-map-caption" id="cp-map-caption"></div>`;
 const questionPanel = () => `<section class="cp-question"><p class="eyebrow" id="cp-kind"></p><p class="prompt">Where is</p><h1 id="cp-name"></h1><p id="cp-instruction"></p><label class="cp-tolerance">City tolerance <select id="cp-tolerance"><option value="25">25 km · precise</option><option value="100">100 km · regional</option><option value="250">250 km · broad</option></select></label><div class="cp-answer"><p id="cp-selection" aria-live="polite">Click the map to place your answer.</p><div id="cp-feedback" role="status" aria-live="polite"></div><button id="cp-check" class="primary" disabled>Check location <span>→</span></button><button id="cp-next" class="primary" hidden>Next learning item <span>→</span></button><button id="cp-reveal" class="secondary">Reveal & learn</button></div><p id="cp-guidance"></p></section>`;
 const cityPicker = () => `<label class="cp-picker">Try a city<select id="cp-city">${data.cities.map((c,i)=>`<option value="${i}">${c.name} · ${c.country}</option>`).join('')}</select></label>`;
 const quizTypeButtons = () => quizTypes.map(quiz => `<button type="button" data-track="${quiz.track}"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="${quiz.icon}" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg><span>${quiz.label}<small>${quiz.description}</small></span></button>`).join('');
@@ -132,7 +133,7 @@ function renderVariant(key: string) {
   variant = ['A','B','C','D','E','F','G','H','I','J','K'].includes(key) ? key : 'A';
   const url = new URL(location.href); url.searchParams.set('variant', variant); history.replaceState(null, '', url);
   index = 0; attempts = []; track = quizNavigationVariants[variant] ? 'countries' : 'cities';
-  detail = variant === 'A' || variant === 'E' ? 'outlines' : variant === 'D' || variant === 'H' || quizNavigationVariants[variant] ? 'detailed' : 'rivers';
+  detail = quizNavigationVariants[variant] ? quizMapDetails[track] : variant === 'A' || variant === 'E' ? 'outlines' : variant === 'D' || variant === 'H' ? 'detailed' : 'rivers';
   showBorders = !!borderVariants[variant];
   restoredContext = false;
   app.className = `city-prototype cp-variant-${variant}`;
@@ -167,7 +168,7 @@ function renderVariant(key: string) {
     surfaceState();
   });
   map.on('moveend zoomend', () => { viewport?.setBounds(map.getBounds()); surfaceState(); });
-  document.querySelector<HTMLSelectElement>('#cp-detail')!.onchange = event => { detail = (event.target as HTMLSelectElement).value as Detail; drawBase(); surfaceState(); };
+  document.querySelector<HTMLSelectElement>('#cp-detail')?.addEventListener('change', event => { detail = (event.target as HTMLSelectElement).value as Detail; drawBase(); surfaceState(); });
   document.querySelector<HTMLInputElement>('#cp-borders')?.addEventListener('change', event => {
     showBorders = (event.target as HTMLInputElement).checked;
     if (showBorders) borderLayer!.addTo(map); else borderLayer!.remove();
@@ -197,7 +198,7 @@ function renderVariant(key: string) {
       index = 0;
     }
     track = chosen;
-    detail = variant === 'D' || variant === 'H' || quizNavigationVariants[variant] ? 'detailed' : track === 'countries' ? 'outlines' : 'rivers';
+    detail = quizNavigationVariants[variant] ? quizMapDetails[track] : variant === 'D' || variant === 'H' ? 'detailed' : track === 'countries' ? 'outlines' : 'rivers';
     beginQuestion();
   });
   const state = document.querySelector<HTMLDetailsElement>('#cp-state')!;
@@ -220,7 +221,12 @@ function renderVariant(key: string) {
 
 function drawBase() {
   layers.clearLayers(); tileErrors = 0; tilesLoaded = 0;
-  document.querySelector<HTMLSelectElement>('#cp-detail')!.value = detail;
+  const detailPicker = document.querySelector<HTMLSelectElement>('#cp-detail');
+  if (detailPicker) detailPicker.value = detail;
+  if (quizNavigationVariants[variant]) {
+    // Country and water maps retain the production map's subdued border treatment.
+    borderLayer!.setStyle({ color:detail === 'detailed' ? '#ffe7a3' : '#63777f', weight:detail === 'detailed' ? 1.2 : 0.8, opacity:detail === 'detailed' ? 0.95 : 1 });
+  }
   const boundaryStyle: L.PolylineOptions = { pane:borderVariants[variant] ? 'prototypeBase' : 'overlayPane', smoothFactor:0, color:'#63777f', weight:borderVariants[variant] ? 0 : 0.8, fillColor:'#334c57', fillOpacity:1 };
   if (detail !== 'detailed') L.geoJSON(countries, { style: boundaryStyle, interactive:false }).addTo(layers);
   if (detail === 'rivers') L.geoJSON(rivers, { style:{ color:'#71b9d9', weight:1.5, opacity:0.8 }, interactive:false }).addTo(layers);
@@ -279,6 +285,7 @@ function renderQuestionText() {
     const quiz = quizTypes.find(type => type.track === q.kind)!;
     document.querySelector('#cp-current-quiz')!.textContent = `${quiz.label} quiz`;
     document.querySelector('#cp-quiz-description')!.textContent = quiz.description;
+    document.querySelector('#cp-quiz-map-context')!.textContent = q.kind === 'countries' ? 'Classic country map' : q.kind === 'cities' ? 'City detail · no labels' : 'Classic map + water features';
   }
   document.querySelector('#cp-kind')!.textContent = `${q.kind === 'cities' ? 'Major city' : q.kind === 'countries' ? 'Country' : 'Water feature'} · name-to-location · ${index+1}`;
   document.querySelector('#cp-name')!.textContent = q.name + '?';
