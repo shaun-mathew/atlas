@@ -35,9 +35,9 @@ test('recognition hides the target name and grades an exact selected country ins
   await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeHidden();
   await expect(page.getByRole('region', { name: 'Country fact card' })).toBeHidden();
-  await expect(page.getByRole('region', { name: 'Country close-up' })).toBeVisible();
-  await expect(page.getByRole('region', { name: 'Regional overview' })).not.toContainText('Brazil');
-  await expect(page.getByRole('region', { name: 'Country close-up' })).not.toContainText('Brazil');
+  await expect(page.getByRole('region', { name: 'World map', exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Country close-up' })).toBeHidden();
+  await expect(page.getByRole('region', { name: 'World map', exact: true })).not.toContainText('Brazil');
   const search = page.getByRole('combobox', { name: 'Search countries & territories' });
   const check = page.getByRole('button', { name: 'Check country' });
   await search.fill('Brazil');
@@ -57,6 +57,52 @@ test('recognition hides the target name and grades an exact selected country ins
   await page.reload();
   await expect(page.getByRole('status')).toContainText('Correct');
   await expect(page.getByRole('region', { name: 'Country fact card' })).toContainText('Brazil');
+});
+
+test('recognition keeps the selected globe through answers and makes close-up exploration optional', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Switch to 3D globe', exact: true }).click();
+  const setup = await openFacetSetup(page);
+  await setup.getByRole('button', { name: 'Continue', exact: true }).click();
+  await setup.getByRole('radio', { name: 'Location-to-name recognition', exact: true }).check();
+  await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
+  const globe = page.getByRole('application', { name: 'Interactive globe' });
+  const closeUp = page.getByRole('region', { name: 'Country close-up' });
+  await expect(globe).toBeVisible();
+  await expect(closeUp).toBeHidden();
+  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeHidden();
+  const search = page.getByRole('combobox', { name: 'Search countries & territories' });
+  await search.fill('Argentina');
+  await page.getByRole('option', { name: 'Argentina', exact: true }).click();
+  await page.getByRole('button', { name: 'Check country' }).click();
+  await page.getByRole('button', { name: 'Retry now' }).click();
+  await expect(globe).toBeVisible();
+  await expect(closeUp).toBeHidden();
+  await search.fill('Brazil');
+  await page.getByRole('option', { name: 'Brazil', exact: true }).click();
+  await page.getByRole('button', { name: 'Check country' }).click();
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(globe).toBeVisible();
+  await expect(closeUp).toBeHidden();
+  await page.getByRole('button', { name: 'Switch to 2D map', exact: true }).click();
+  const world = page.getByRole('region', { name: 'World map', exact: true });
+  await expect(world).toBeVisible();
+  await page.getByRole('button', { name: 'Explore target', exact: true }).click();
+  await expect(closeUp).toBeVisible();
+  await expect(closeUp).not.toContainText('China');
+  await expect(page.getByRole('region', { name: 'Regional overview' })).not.toContainText('China');
+  await page.getByRole('button', { name: 'Back to world map', exact: true }).click();
+  await expect(world).toBeVisible();
+  await search.fill('China');
+  await page.getByRole('option', { name: "People's Republic of China", exact: true }).click();
+  await page.getByRole('button', { name: 'Check country' }).click();
+  await expect(page.getByRole('status')).toContainText('Correct — country identified.');
+  await page.getByRole('button', { name: 'Next learning item' }).click();
+  await expect(world).toBeVisible();
+  await expect(closeUp).toBeHidden();
+  await page.reload();
+  await expect(world).toBeVisible();
+  await expect(closeUp).toBeHidden();
 });
 
 test('recognition search normalizes names and aliases without leaving the selected region', async ({ page }) => {

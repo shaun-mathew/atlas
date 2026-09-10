@@ -177,7 +177,7 @@ const countryResults = document.querySelector<HTMLElement>('#country-results')!;
 const searchSummary = document.querySelector<HTMLElement>('#search-summary')!;
 let marker: MapPin | undefined;
 let answerPolygon: L.Polygon | undefined;
-let linkedOpen = session.assisted || session.recognizingLocation;
+let linkedOpen = session.assisted && !session.recognizingLocation;
 let globe: Globe | undefined;
 let globeOpen = false;
 const globeContainer = document.querySelector<HTMLElement>('#globe')!;
@@ -674,13 +674,13 @@ check.addEventListener('click', () => {
 });
 next.addEventListener('click', () => {
   session.next();
-  linkedOpen = session.assisted || session.recognizingLocation;
+  linkedOpen = session.assisted && !session.recognizingLocation;
   renderQuestion();
   if (globeOpen && !session.recognizingLocation) globe?.reset();
 });
 retry.addEventListener('click', () => {
   session.retry();
-  linkedOpen = session.assisted || session.recognizingLocation;
+  linkedOpen = session.assisted && !session.recognizingLocation;
   renderQuestion();
 });
 document.querySelector('#location-help')!.addEventListener('click', () => {
@@ -741,7 +741,7 @@ document.querySelector('#confirm-reset')!.addEventListener('click', async () => 
 });
 const facetSetup = createFacetSetup(selection => {
   session.choosePractice(selection);
-  linkedOpen = session.assisted || session.recognizingLocation;
+  linkedOpen = session.assisted && !session.recognizingLocation;
   renderQuestion();
 });
 document.querySelector('#facet-mode')!.addEventListener('click', () => facetSetup.open(session.selection));
@@ -749,14 +749,14 @@ document.querySelector('#edit-facets')!.addEventListener('click', () => facetSet
 document.querySelector('#adaptive-mode')!.addEventListener('click', () => {
   if (!session.selection) return;
   session.choosePractice(null);
-  linkedOpen = session.assisted || session.recognizingLocation;
+  linkedOpen = session.assisted && !session.recognizingLocation;
   renderQuestion();
 });
 const renderAccountProfile = createAccountProfile(accounts);
 accounts.onchange = sessionChanged => {
   if (sessionChanged) {
     session = accounts.session;
-    linkedOpen = session.assisted || session.recognizingLocation;
+    linkedOpen = session.assisted && !session.recognizingLocation;
     renderQuestion();
   }
   renderAccountProfile();
