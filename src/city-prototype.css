@@ -176,7 +176,7 @@
   .cp-overview-card p { grid-column: 2; margin: 0; }
 }
 
-/* Third comparison set: identical bordered-map quizzes, different navigation. */
+/* Quiz-switching comparison; K reuses the original map-first shell. */
 .city-prototype .prototype-set-select { border: 0; padding: 2px 5px; background: transparent; color: #344b43; font: 10px/1.3 ui-monospace, monospace; text-align: center; cursor: pointer; }
 .cp-quiz-description { color: #aab8bf; font: 11px/1.6 ui-monospace, monospace; margin: 0; }
 .cp-quiz-tab-list, .cp-quiz-rail-nav, .cp-quiz-choice-grid { display: flex; gap: 8px; }
@@ -200,21 +200,12 @@
 .cp-quiz-dock-heading .cp-kicker { margin: 0; }
 .cp-quiz-dock .cp-track-question { border: 0; padding-top: 12px; padding-bottom: 10px; }
 .cp-switch-note { margin: 0; padding: 0 26px 14px; color: #8da6b1; font-size: 10px; line-height: 1.5; }
-.cp-quiz-focus { display: flex; flex-direction: column; min-height: 0; }
-.cp-quiz-focus > .cp-map-stage { flex: 1; }
-.cp-quiz-focus-header { display: flex; align-items: center; gap: 30px; padding: 18px 26px; border-bottom: 1px solid #ffffff20; }
-.cp-quiz-focus-header .cp-kicker { margin-bottom: 6px; }
-.cp-quiz-focus-header h2 { font-size: 23px; }
-.cp-quiz-focus-header #cp-change-quiz { margin-left: auto; }
-#cp-quiz-chooser { width: min(850px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); overflow-y: auto; border: 1px solid #63777f; border-radius: 18px; padding: 30px; background: #14242e; color: #f5f4e9; box-shadow: 0 24px 100px #0008; }
-#cp-quiz-chooser::backdrop { background: #08131bcc; }
 #cp-quiz-chooser header > p:last-child { max-width: 610px; font-size: 13px; line-height: 1.7; color: #aab8bf; }
-.cp-quiz-choice-grid { gap: 14px; margin: 26px 0; }
-.cp-quiz-choice-grid button { flex: 1; flex-direction: column; align-items: flex-start; padding: 22px; min-width: 0; font-size: 21px; }
-.cp-quiz-choice-grid svg { width: 38px; height: 38px; margin-bottom: 14px; }
-.cp-quiz-choice-grid small { display: block; color: #aab8bf; font-size: 11px; line-height: 1.7; margin-top: 10px; }
+.cp-quiz-choice-grid { flex-direction: column; gap: 10px; margin: 22px 0 0; }
+.cp-quiz-choice-grid button { align-items: center; padding: 16px; font-size: 16px; }
+.cp-quiz-choice-grid small { display: block; color: #aab8bf; font-size: 11px; line-height: 1.7; margin-top: 4px; }
 @media(max-width: 900px) {
-  .cp-quiz-tabs-header, .cp-quiz-focus-header { position: sticky; top: 0; z-index: 1100; background: #14242e; }
+  .cp-quiz-tabs-header { position: sticky; top: 0; z-index: 1100; background: #14242e; }
   .cp-quiz-tabs-header { flex-direction: column; align-items: stretch; padding: 18px; gap: 14px; }
   .cp-quiz-tabs-header h2 { font-size: 20px; }
   .cp-quiz-tab-list { gap: 6px; }
@@ -234,12 +225,25 @@
   .cp-quiz-dock .cp-track-question { padding: 12px 14px; }
   .cp-switch-note { padding: 0 14px 18px; }
   .cp-quiz-rail .cp-tolerance { flex-wrap: wrap; }
-  .cp-quiz-focus-header { flex-wrap: wrap; gap: 12px; padding: 18px; }
-  .cp-quiz-focus-header .cp-quiz-description { order: 3; flex-basis: 100%; }
-  .cp-quiz-focus > .cp-map-stage { flex: none; height: 46dvh; min-height: 330px; }
-  #cp-quiz-chooser { padding: 22px; }
-  .cp-quiz-choice-grid { flex-direction: column; gap: 10px; margin: 20px 0; }
-  .cp-quiz-choice-grid button { flex-direction: row; align-items: center; gap: 18px; padding: 16px; font-size: 18px; }
-  .cp-quiz-choice-grid svg { margin: 0; width: 30px; height: 30px; }
-  .cp-quiz-choice-grid small { margin-top: 4px; }
+}
+
+/* Keep the production header, question typography, answer dock and mobile sheet. */
+#app.city-prototype.cp-variant-K { display: block; height: 100dvh; min-height: 480px; overflow: hidden; }
+.cp-variant-K #cp-map { position: absolute; inset: 0; z-index: 0; }
+.cp-variant-K .cp-body { display: block; }
+.cp-variant-K .learning-modes { align-items: center; gap: 12px; }
+.cp-variant-K #cp-current-quiz { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.cp-variant-K #cp-reveal { width: auto; margin: 0; }
+.cp-variant-K #cp-guidance { color: var(--muted); }
+.cp-variant-K #cp-world { position: absolute; z-index: 3; right: 28px; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); width: 34px; min-height: 34px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.cp-variant-K .leaflet-top.leaflet-right { top: calc(144px + env(safe-area-inset-top, 0px)); right: 17px; }
+.cp-variant-K .map-caption { max-width: calc(100vw - 460px); letter-spacing: 0; line-height: 1.6; text-transform: none; }
+.cp-variant-K .cp-observatory { position: absolute; z-index: 3; left: 38px; bottom: 28px; min-height: 0; padding: 0; border: 0; }
+.cp-variant-K #cp-state[open] { position: fixed; left: 18px; bottom: 100px; width: min(460px, calc(100vw - 36px)); padding: 16px; background: #14242e; border: 1px solid #526574; border-radius: 12px; }
+.cp-variant-K #cp-state pre { position: static; width: 100%; max-height: 38dvh; padding: 10px; margin-bottom: 0; }
+@media(max-width: 700px) {
+  .cp-variant-K .session-panel { bottom: calc(105px + env(safe-area-inset-bottom, 0px)); max-height: min(45dvh, calc(100dvh - 300px)); }
+  .cp-variant-K .leaflet-control-zoom { display: none; }
+  .cp-variant-K #cp-world { top: calc(140px + env(safe-area-inset-top, 0px)); right: 14px; bottom: auto; }
+  .cp-variant-K .cp-observatory { left: 18px; bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
 }
