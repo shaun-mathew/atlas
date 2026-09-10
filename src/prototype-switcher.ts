@@ -1,19 +1,22 @@
 // Throwaway development-only UI; not a production navigation component.
 export function PrototypeSwitcher(current: string, change: (key: string) => void) {
   const flowSet = ['E', 'F', 'G', 'H'].includes(current);
-  const variants = flowSet ? ['E', 'F', 'G', 'H'] : ['A', 'B', 'C', 'D'];
-  const names: Record<string, string> = { A:'Mixed practice', B:'City lab', C:'Geography tracks', D:'Tracks + borders', E:'Country → city', F:'Regional circuit', G:'Fading context', H:'Overview + close-up' };
+  const quizSet = ['I', 'J', 'K'].includes(current);
+  const variants = quizSet ? ['I', 'J', 'K'] : flowSet ? ['E', 'F', 'G', 'H'] : ['A', 'B', 'C', 'D'];
+  const names: Record<string, string> = { A:'Mixed practice', B:'City lab', C:'Geography tracks', D:'Tracks + borders', E:'Country → city', F:'Regional circuit', G:'Fading context', H:'Overview + close-up', I:'Top quiz tabs', J:'Quiz side rail', K:'Quiz chooser' };
   const bar = document.createElement('nav');
   bar.className = 'prototype-switcher';
   bar.setAttribute('aria-label', 'Prototype variants');
   if (!import.meta.env.DEV) return bar;
-  const otherSet = new URL(location.href);
-  otherSet.searchParams.set('variant', flowSet ? 'A' : 'E');
-  bar.innerHTML = `<button aria-label="Previous variant">←</button><span><small>PROTOTYPE · ${flowSet ? 'E–H LEARNING FLOWS' : 'A–D MAP LAYOUTS'}</small><b>${current} · ${names[current]}</b><a class="prototype-set-link" href="${otherSet.href}">${flowSet ? 'Compare A–D map layouts' : 'Try E–H learning flows'}</a></span><button aria-label="Next variant">→</button>`;
-  bar.querySelector('a')!.onclick = event => {
-    event.preventDefault();
-    history.replaceState(null, '', otherSet);
-    change(flowSet ? 'A' : 'E');
+  const group = quizSet ? 'I' : flowSet ? 'E' : 'A';
+  bar.innerHTML = `<button aria-label="Previous variant">←</button><span><small>THROWAWAY PROTOTYPE</small><b>${current} · ${names[current]}</b><select class="prototype-set-select" aria-label="Prototype comparison set"><option value="I">I–K · Quiz switching</option><option value="A">A–D · Map layouts</option><option value="E">E–H · Learning flows</option></select></span><button aria-label="Next variant">→</button>`;
+  const groupPicker = bar.querySelector('select')!;
+  groupPicker.value = group;
+  groupPicker.onchange = () => {
+    const url = new URL(location.href);
+    url.searchParams.set('variant', groupPicker.value);
+    history.replaceState(null, '', url);
+    change(groupPicker.value);
   };
   function cycle(step: number) {
     const key = variants[(variants.indexOf(current) + step + variants.length) % variants.length];
