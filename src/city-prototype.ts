@@ -298,6 +298,12 @@ function drawBase() {
     }).addTo(layers);
     tiles.on('tileerror',()=>{ tileErrors++; surfaceState(); });
     tiles.on('tileload',()=>{ tilesLoaded++; surfaceState(); });
+    if (question().kind === 'rivers') {
+      // Show the whole river network, not the answer. The dark casing keeps
+      // blue lines legible over both bright terrain and dark satellite water.
+      L.geoJSON(rivers, { style:{ color:'#0b2938', weight:3, opacity:0.95 }, interactive:false }).addTo(layers);
+      L.geoJSON(rivers, { style:{ color:'#78dfff', weight:1.5, opacity:1 }, interactive:false }).addTo(layers);
+    }
   }
 }
 function mapPadding(padding: number): L.FitBoundsOptions {
@@ -466,7 +472,7 @@ function surfaceState() {
   if(lab) lab.innerHTML=`<b>${attempts.length}</b><span>city attempts this experiment</span><small>Separate city test; no mixed queue.</small>`;
   const caption = document.querySelector('#cp-map-caption')!;
   if (originalQuizVariants[variant]) {
-    caption.textContent = `${q.kind === 'countries' ? 'World map' : q.kind === 'cities' ? 'City detail · no labels' : 'Bodies of water · satellite detail'} · country borders${tileErrors ? ` · ${tileErrors} imagery tile failures` : ''}`;
+    caption.textContent = `${q.kind === 'countries' ? 'World map' : q.kind === 'cities' ? 'City detail · no labels' : 'Bodies of water · satellite + river lines'} · country borders${tileErrors ? ` · ${tileErrors} imagery tile failures` : ''}`;
   } else {
     caption.textContent = detail==='detailed' ? `Satellite imagery · no labels · urban footprints are visual hints · ${tileErrors ? `${tileErrors} tile failures: detail may be incomplete` : tilesLoaded ? 'tiles loaded' : 'loading online tiles…'}` : detail==='land' ? 'Land shape only · no rivers or internal borders · regional frame still given' : detail==='rivers' ? '1:50m outlines + rivers · no streets or city labels · works offline' : 'Current 1:50m country geometry · zoom adds no new detail · works offline';
     if (borderVariants[variant]) caption.textContent += showBorders ? ' · country borders ON (1:50m)' : ' · country borders OFF';
