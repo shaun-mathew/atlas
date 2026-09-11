@@ -4,15 +4,11 @@ import { countries, introductionOrder, matchesCountrySearch, normalizeCountrySea
 import { factVersion } from './facts';
 import { facetSelectionSchema, matchesFacets, type FacetSelection } from './facets';
 import { boundaryVersion, initialProgress, learningItemKey, progressSchema, type Attempt, type Progress, type SpatialSkill } from './progress';
+import { scheduleReview, type Proficiency } from './scheduler';
 
 const countriesById = new Map(countries.map(country => [country.properties.id, country]));
-type Proficiency = {
-  level: 'Learning' | 'Familiar' | 'Retained';
-  intervalDays: number;
-  dueAt: string;
-};
-const reviewIntervals = [1, 3, 7, 14, 30];
-const day = 24 * 60 * 60 * 1000;
+const recommendedSkills: readonly SpatialSkill[] = ['name-to-location', 'location-to-name-recognition', 'shape-recognition'];
+type Question = NonNullable<Progress['current']>;
 
 
 // Attempts are the durable source of skill proficiency and scheduling state.
@@ -201,24 +197,15 @@ export class LearnerSession {
     if (attempt.kind === 'retry' || attempt.kind === 'practice') {
       if (repeatedShapeMiss) {
         const recheckAt = new Date(Date.parse(attempt.answeredAt) + 10 * 60 * 1000).toISOString();
+        const item = previous ?? scheduleReview(undefined, attempt);
         this.learningItems.set(key, {
-          level: 'Learning', intervalDays: 0,
-          dueAt: previous && previous.dueAt < recheckAt ? previous.dueAt : recheckAt,
+          ...item, level: 'Learning',
+          dueAt: item.dueAt < recheckAt ? item.dueAt : recheckAt,
         });
       }
       return;
     }
-    const unassistedSuccess = attempt.correct && !attempt.assisted;
-    const intervalDays = unassistedSuccess
-      ? attempt.kind === 'review'
-        ? reviewIntervals.find(interval => interval > (previous?.intervalDays ?? 0)) ?? 30
-        : 1
-      : 0;
-    this.learningItems.set(key, {
-      level: !unassistedSuccess ? 'Learning' : intervalDays > 1 ? 'Retained' : 'Familiar',
-      intervalDays,
-      dueAt: new Date(Date.parse(attempt.answeredAt) + (unassistedSuccess ? intervalDays * day : 10 * 60 * 1000)).toISOString(),
-    });
+    this.learningItems.set(key, scheduleReview(previous, attempt));
   }
 
   private recordAttempt(attempt: Attempt) {
@@ -312,13 +299,43 @@ export class LearnerSession {
   }
 
   private selectQuestion(now: string) {
-    const selected = this.selectAdaptive(now);
+    const selected = this.selection
+      ? this.selectAdaptive(now, this.practiceSkill)!
+      : this.selectRecommended(now);
     const index = this.state.pausedQuestions.findIndex(question => learningItemKey(question) === learningItemKey(selected));
     return index < 0 ? selected : this.state.pausedQuestions.splice(index, 1)[0];
   }
 
-  private selectAdaptive(now: string) {
-    const skill = this.practiceSkill;
+  private selectRecommended(now: string): Question {
+    // Answers reveal the name, outline and location. Separate sibling skills by
+    // two other answers, or ten minutes, rather than testing immediate exposure.
+    const recentCountries = new Set<string>();
+    let recentAnswers = 0;
+    for (let index = this.attempts.length - 1; index >= 0 && recentAnswers < 2; index--) {
+      const attempt = this.attempts[index];
+      if (!this.supportsAttempt(attempt)) continue;
+      if (Date.parse(now) - Date.parse(attempt.answeredAt) >= 10 * 60 * 1000) break;
+      recentCountries.add(attempt.countryId);
+      recentAnswers++;
+    }
+    let selected: Question | undefined;
+    for (const skill of recommendedSkills) {
+      const candidate = this.selectAdaptive(now, skill, recentCountries);
+      if (!candidate) continue;
+      if (!selected
+        || (candidate.kind === 'review' && (selected.kind !== 'review'
+          || this.learningItems.get(learningItemKey(candidate))!.dueAt < this.learningItems.get(learningItemKey(selected))!.dueAt))
+        || (candidate.kind !== 'review' && selected.kind !== 'review'
+          && (this.selectionCounts.get(skill)?.attempts ?? 0) < (this.selectionCounts.get(selected.skill)?.attempts ?? 0))) {
+        selected = candidate;
+      }
+    }
+    // Name-to-location always has an unseen or previously seen country outside
+    // the two-answer exclusion, even before any recognition skills unlock.
+    return selected!;
+  }
+
+  private selectAdaptive(now: string, skill: SpatialSkill, recentCountries?: ReadonlySet<string>): Question | undefined {
     const counts = this.selectionCounts.get(skill);
     let dueCountryId: string | undefined;
     let earliestDueAt: string | undefined;
@@ -328,6 +345,7 @@ export class LearnerSession {
     let oldestSeenIndex = Infinity;
     for (const country of countries) {
       if (this.selection && !matchesFacets(country, this.selection)) continue;
+      if (recentCountries?.has(country.properties.id)) continue;
       const countryId = country.properties.id;
       const key = learningItemKey({ countryId, skill });
       const item = this.learningItems.get(key);
@@ -351,13 +369,15 @@ export class LearnerSession {
     if (dueCountryId) return { countryId: dueCountryId, skill, kind: 'review' as const, assisted: false };
     const unseenCountryId = introductionOrder.find(country =>
       (!this.selection || matchesFacets(country, this.selection))
+        && !recentCountries?.has(country.properties.id)
+        && (this.selection || skill === 'name-to-location'
+          || (this.learningItems.get(learningItemKey({ countryId: country.properties.id, skill: 'name-to-location' }))?.level ?? 'Learning') !== 'Learning')
         && !this.selectionHistory.has(learningItemKey({ countryId: country.properties.id, skill })))?.properties.id;
     if (revisitCountryId && ((counts?.introductions ?? 0) >= 2 || !unseenCountryId)) {
       return { countryId: revisitCountryId, skill, kind: 'practice' as const, assisted: false };
     }
     if (unseenCountryId) return { countryId: unseenCountryId, skill, kind: 'new' as const, assisted: false };
-    // With no unseen countries, at least one answered country must exist.
-    return { countryId: oldestCountryId!, skill, kind: 'practice' as const, assisted: false };
+    return oldestCountryId ? { countryId: oldestCountryId, skill, kind: 'practice', assisted: false } : undefined;
   }
 
   next() {

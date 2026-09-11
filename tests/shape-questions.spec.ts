@@ -85,17 +85,19 @@ test('repeated shape misses bring review forward without letting later retries p
       learning: 'shape-recognition',
     });
     learner.answerCountry('BRA');
+    return learner;
+  });
+  const firstReview = await session.evaluate(learner => learner.proficiency);
+  expect(firstReview?.level).toBe('Familiar');
+  await session.evaluate(learner => {
     const practice = learner.snapshot();
     practice.current = { countryId: 'BRA', skill: 'shape-recognition', kind: 'practice', assisted: false };
     practice.cursor = practice.attempts.length;
     learner.replace(practice);
     learner.answerCountry('ARG');
     learner.retry();
-    return learner;
   });
-  expect(await session.evaluate(learner => learner.proficiency)).toMatchObject({
-    level: 'Familiar', dueAt: '2026-09-08T12:00:00.000Z',
-  });
+  expect(await session.evaluate(learner => learner.proficiency)).toEqual(firstReview);
   await page.clock.setFixedTime(new Date('2026-09-07T12:09:00Z'));
   await session.evaluate(learner => {
     learner.replace(learner.snapshot());
@@ -134,35 +136,38 @@ test('scheduled shape successes advance retention while name-to-location keeps i
     const learner = new LearnerSession(null);
     learner.start();
     learner.answer(-52, -12);
-    learner.choosePractice({
-      scope: 'countries', continent: 'Worldwide', region: 'All regions',
-      learning: 'shape-recognition',
-    });
     return learner;
   });
+  const recallDue = await session.evaluate(learner => learner.proficiency!.dueAt);
+  await session.evaluate(learner => learner.choosePractice({
+      scope: 'countries', continent: 'Worldwide', region: 'All regions',
+      learning: 'shape-recognition',
+  }));
   expect(await session.evaluate(learner => learner.proficiency)).toBeUndefined();
   await session.evaluate(learner => learner.answerCountry('BRA'));
-  for (const [date, nextDue] of [
-    ['2026-09-08', '2026-09-11T12:00:00.000Z'],
-    ['2026-09-11', '2026-09-18T12:00:00.000Z'],
-    ['2026-09-18', '2026-10-02T12:00:00.000Z'],
-  ]) {
-    await page.clock.setFixedTime(new Date(`${date}T12:00:00Z`));
+  let dueAt = await session.evaluate(learner => learner.proficiency!.dueAt);
+  for (let review = 0; review < 3; review++) {
+    await page.clock.setFixedTime(new Date(dueAt));
     expect(await session.evaluate(learner => {
       learner.replace(learner.snapshot());
       learner.next();
       return { country: learner.country?.properties.id, kind: learner.questionKind };
     })).toEqual({ country: 'BRA', kind: 'review' });
-    expect(await session.evaluate(learner => {
+    const proficiency = await session.evaluate(learner => {
       learner.answerCountry('BRA');
-      return learner.proficiency;
-    })).toMatchObject({ level: 'Retained', dueAt: nextDue });
+      return learner.proficiency!;
+    });
+    expect(proficiency.level).toBe('Retained');
+    expect(Date.parse(proficiency.dueAt)).toBeGreaterThan(Date.parse(dueAt));
+    dueAt = proficiency.dueAt;
   }
   expect(await session.evaluate(learner => {
-    learner.choosePractice(null);
+    learner.choosePractice({
+      scope: 'countries', continent: 'Worldwide', region: 'All regions', learning: 'name-to-location',
+    });
     return { country: learner.country?.properties.id, proficiency: learner.proficiency };
   })).toMatchObject({
-    country: 'BRA', proficiency: { level: 'Familiar', dueAt: '2026-09-08T12:00:00.000Z' },
+    country: 'BRA', proficiency: { level: 'Familiar', dueAt: recallDue },
   });
   await session.dispose();
 });
@@ -197,11 +202,15 @@ test('merging and reloading keeps all three skills and their paused reviews inde
       return learner.snapshot();
     };
     const location = branch('location-to-name-recognition');
+    const locationDue = new LearnerSession(null, location).proficiency!.dueAt;
     const shape = branch('shape-recognition');
     const merged = mergeProgress(location, shape);
     const expectedIds = [...new Set([...location.attempts, ...shape.attempts].map(attempt => attempt.id))].sort();
     new LearnerSession('cross-skill-merge', merged);
-    return { learner: new LearnerSession('cross-skill-merge'), expectedIds };
+    return {
+      learner: new LearnerSession('cross-skill-merge'), expectedIds,
+      recallDue: original.proficiency!.dueAt, locationDue,
+    };
   });
   const restored = await session.evaluate(({ learner, expectedIds }) => ({
     ids: learner.attempts.map(attempt => attempt.id).sort(), expectedIds,
@@ -215,7 +224,8 @@ test('merging and reloading keeps all three skills and their paused reviews inde
   ]);
   expect(restored.proficiency).toMatchObject({ level: 'Learning', dueAt: '2026-09-07T12:10:00.000Z' });
 
-  await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
+  const { recallDue, locationDue } = await session.evaluate(({ recallDue, locationDue }) => ({ recallDue, locationDue }));
+  await page.clock.setFixedTime(new Date(recallDue));
   expect(await session.evaluate(({ learner }) => {
     learner.choosePractice({
       scope: 'countries', continent: 'Worldwide', region: 'All regions', learning: 'location-to-name-recognition',
@@ -225,18 +235,22 @@ test('merging and reloading keeps all three skills and their paused reviews inde
     return { kind, feedback: learner.feedback, proficiency: learner.proficiency, paused: learner.snapshot().pausedQuestions };
   })).toMatchObject({
     kind: 'retry', feedback: { skill: 'location-to-name-recognition', correct: true },
-    proficiency: { level: 'Familiar', dueAt: '2026-09-08T12:00:00.000Z' },
+    proficiency: { level: 'Familiar', dueAt: locationDue },
     paused: [{ countryId: 'BRA', skill: 'shape-recognition', kind: 'retry' }],
   });
-  expect(await session.evaluate(({ learner }) => {
-    learner.choosePractice(null);
+  const reviewed = await session.evaluate(({ learner }) => {
+    learner.choosePractice({
+      scope: 'countries', continent: 'Worldwide', region: 'All regions', learning: 'name-to-location',
+    });
     const kind = learner.questionKind;
     learner.answer(-52, -12);
     return { kind, feedback: learner.feedback, proficiency: learner.proficiency };
-  })).toMatchObject({
-    kind: 'review', feedback: { skill: 'name-to-location', correct: true },
-    proficiency: { level: 'Retained', dueAt: '2026-09-11T12:00:00.000Z' },
   });
+  expect(reviewed).toMatchObject({
+    kind: 'review', feedback: { skill: 'name-to-location', correct: true },
+    proficiency: { level: 'Retained' },
+  });
+  expect(Date.parse(reviewed.proficiency!.dueAt)).toBeGreaterThan(Date.parse(recallDue));
   expect(await session.evaluate(({ learner }) => {
     learner.choosePractice({
       scope: 'countries', continent: 'Worldwide', region: 'All regions', learning: 'shape-recognition',

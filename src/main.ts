@@ -64,7 +64,7 @@ app.innerHTML = `
     <section id="welcome">
       <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> Guest practice</p>
       <h1>A world worth knowing<span class="accent">.</span></h1>
-      <p class="instructions">Start with larger, recognizable countries and work toward smaller places. Keep practicing for as long as you like. No account needed.</p>
+      <p class="instructions">Start with larger, recognizable countries and work toward smaller places. Learn to locate them, then identify highlighted locations and silhouettes. Recommended practice mixes all three skills with independent reviews. No account needed.</p>
       <div class="answer-dock">
         <button id="start" class="primary" type="button">Start country session <span aria-hidden="true">→</span></button>
         <p class="local-note">Your progress stays in this browser.</p>
@@ -72,6 +72,7 @@ app.innerHTML = `
     </section>
     <section id="session" hidden>
       <p class="eyebrow"><span class="live-dot" aria-hidden="true"></span> <span id="question-kind">New learning item</span> <span id="question-number"></span></p>
+      <p id="current-skill" class="local-note"></p>
       <p class="prompt">Where is</p>
       <h1><span id="country"></span><span class="accent">?</span></h1>
       <div class="location-tools">
@@ -95,6 +96,7 @@ app.innerHTML = `
         <section id="proficiency" aria-label="Name-to-location proficiency" hidden>
           <p><span id="proficiency-skill">Name-to-location</span> · <strong id="proficiency-level"></strong></p>
           <p>Review due <time id="review-at"></time></p>
+          <p>Adaptive FSRS reviews target 90% recall at review time: a model estimate, not your measured accuracy.</p>
           <p id="retry-note" hidden>Immediate retry records practice, not retention; your review time stays unchanged.</p>
           <p id="practice-note" hidden>Practice revisit reinforces this country without changing retention proficiency or its scheduled review.</p>
         </section>
@@ -447,6 +449,9 @@ function renderQuestion(animate = true) {
   const selectedFacets = session.selection;
   document.querySelector<HTMLElement>('#current-facets')!.hidden = !selectedFacets;
   document.querySelector('#current-facet-description')!.textContent = selectedFacets ? describeFacets(selectedFacets) : '';
+  document.querySelector('#current-skill')!.textContent = reading
+    ? 'Country fact cards'
+    : `${selectedFacets ? 'Custom' : 'Recommended'} · ${learningLabels[session.skill]}`;
   document.querySelector('#adaptive-mode')!.setAttribute('aria-pressed', String(!selectedFacets));
   document.querySelector('#facet-mode')!.setAttribute('aria-pressed', String(!!selectedFacets));
   document.querySelector<HTMLElement>('#welcome')!.hidden = session.started;

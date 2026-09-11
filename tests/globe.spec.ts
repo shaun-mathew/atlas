@@ -56,13 +56,13 @@ test('rotating and zooming the globe preserves a country answer across presentat
   await expect(page.getByRole('status')).toContainText('Correct');
   const proficiency = page.getByRole('region', { name: 'Name-to-location proficiency' });
   await expect(proficiency).toContainText('Familiar');
-  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-08T12:00:00.000Z');
+  const dueAt = (await proficiency.locator('time').getAttribute('datetime'))!;
   await page.getByRole('button', { name: 'Switch to 2D map', exact: true }).click();
   await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();
   await page.reload();
   await expect(proficiency).toContainText('Familiar');
-  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-08T12:00:00.000Z');
-  await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', dueAt);
+  await page.clock.setFixedTime(new Date(dueAt));
   await page.getByRole('button', { name: 'Next learning item' }).click();
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
@@ -72,9 +72,11 @@ test('rotating and zooming the globe preserves a country answer across presentat
   await page.mouse.click(map.x + 128 / 360 * 1024 - Math.round(512 - map.width / 2), map.y + mercatorY(-12) - Math.round(mercatorY(15) - map.height / 2));
   await page.getByRole('button', { name: 'Check location' }).click();
   await expect(proficiency).toContainText('Retained');
-  await expect(proficiency.locator('time')).toHaveAttribute('datetime', '2026-09-11T12:00:00.000Z');
+  const retainedDueAt = (await proficiency.locator('time').getAttribute('datetime'))!;
+  expect(Date.parse(retainedDueAt)).toBeGreaterThan(Date.parse(dueAt));
   await page.getByRole('button', { name: 'Switch to 3D globe', exact: true }).click();
   await expect(proficiency).toContainText('Retained');
+  await expect(proficiency.locator('time')).toHaveAttribute('datetime', retainedDueAt);
   await expect(page.getByText('2 answered · 2 correct', { exact: true })).toBeVisible();
 });
 

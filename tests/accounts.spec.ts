@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { answerWorldPoint } from './map-interaction';
+import type * as SchedulerModule from '../src/scheduler';
+import type * as ProgressModule from '../src/progress';
 
 test.use({ reducedMotion: 'reduce' });
 
@@ -50,7 +52,7 @@ test('attaching guest history preserves versioned proficiency and continues adap
     id: 'remote-brazil', countryId: 'BRA', skill: 'name-to-location', kind: 'new',
     boundaryVersion: 'natural-earth-5.1.2-50m', factVersion: '2026-09-07',
     longitude: -52, latitude: -12, correct: true, assisted: false,
-    selectedCountry: 'Brazil', answeredAt: '2026-09-06T12:00:00.000Z',
+    selectedCountry: 'Brazil', answeredAt: '2026-08-01T12:00:00.000Z',
   };
   const registered = await request.post('/api/register', {
     headers: { Origin: baseURL! },
@@ -66,7 +68,7 @@ test('attaching guest history preserves versioned proficiency and continues adap
       countryId: 'CHN', skill: 'name-to-location', kind: 'new',
       boundaryVersion: 'natural-earth-5.1.2-50m', factVersion: '2026-09-07',
       longitude: 105, latitude: 35, correct: true, assisted: false,
-      selectedCountry: 'China', answeredAt: '2026-09-08T12:00:00.000Z',
+      selectedCountry: 'China', answeredAt: '2026-09-08T11:50:00.000Z',
     };
     localStorage.setItem('atlas-practice.guest', JSON.stringify({
       version: 6, started: true, cursor: 3,
@@ -75,11 +77,17 @@ test('attaching guest history preserves versioned proficiency and continues adap
         { ...answer, id: 'old-fact', countryId: 'BRA', factVersion: 'old-facts', correct: false },
         { ...answer, id: 'other-skill', countryId: 'BRA', skill: 'location-to-name recognition', correct: false },
         { ...answer, id: 'retry', countryId: 'BRA', kind: 'retry', correct: false },
-        { ...answer, id: 'guest-china' },
+        { ...answer, id: 'guest-china', answeredAt: '2026-09-08T12:00:00.000Z' },
       ],
     }));
   });
   await page.goto('/');
+  const originalDue = await page.evaluate(async attempt => {
+    const modulePath = '/src/scheduler.ts';
+    // Static imports cannot enter the application realm used to replay this answer.
+    const { scheduleReview } = await import(modulePath) as typeof SchedulerModule;
+    return scheduleReview(undefined, attempt as ProgressModule.Attempt).dueAt;
+  }, first);
   await page.getByRole('button', { name: 'Profile', exact: true }).click();
   const profile = page.getByRole('dialog', { name: 'Your profile' });
   await profile.getByLabel('Username', { exact: true }).fill(username);
@@ -92,15 +100,21 @@ test('attaching guest history preserves versioned proficiency and continues adap
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
   await expect(page.locator('#proficiency-level')).toHaveText('Familiar');
-  await expect(page.locator('#review-at')).toHaveAttribute('datetime', '2026-09-07T12:00:00.000Z');
+  await expect(page.locator('#review-at')).toHaveAttribute('datetime', originalDue);
   await page.reload();
   await expect(page.getByLabel('Practice results')).toContainText('5 answered');
-  await expect(page.locator('#review-at')).toHaveAttribute('datetime', '2026-09-07T12:00:00.000Z');
+  await expect(page.locator('#review-at')).toHaveAttribute('datetime', originalDue);
 });
 
 test('recognition guest attachment preserves selected identity and a legacy recall review for the same country', async ({ page, request, baseURL, browser }) => {
   await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
   const username = `recognition-${crypto.randomUUID().slice(0, 16)}`;
+  const legacyRecall = {
+    id: 'legacy-recall', countryId: 'BRA', skill: 'name-to-location', kind: 'new',
+    boundaryVersion: 'natural-earth-5.1.2-50m', factVersion: '2026-09-07',
+    longitude: -52, latitude: -12, correct: true, assisted: false,
+    selectedCountry: 'Brazil', answeredAt: '2026-08-01T12:00:00.000Z',
+  };
   const registered = await request.post('/api/register', {
     headers: { Origin: baseURL! },
     data: {
@@ -108,17 +122,18 @@ test('recognition guest attachment preserves selected identity and a legacy reca
       progress: {
         version: 6, started: true, cursor: 1,
         current: { countryId: 'BRA', kind: 'review', assisted: false },
-        attempts: [{
-          id: 'legacy-recall', countryId: 'BRA', skill: 'name-to-location', kind: 'new',
-          boundaryVersion: 'natural-earth-5.1.2-50m', factVersion: '2026-09-07',
-          longitude: -52, latitude: -12, correct: true, assisted: false,
-          selectedCountry: 'Brazil', answeredAt: '2026-09-06T12:00:00.000Z',
-        }],
+        attempts: [legacyRecall],
       },
     },
   });
   expect(registered.status()).toBe(201);
   await page.goto('/');
+  const originalRecallDue = await page.evaluate(async attempt => {
+    const modulePath = '/src/scheduler.ts';
+    // Static imports cannot enter the application realm used to replay this answer.
+    const { scheduleReview } = await import(modulePath) as typeof SchedulerModule;
+    return scheduleReview(undefined, attempt as ProgressModule.Attempt).dueAt;
+  }, legacyRecall);
   await page.getByRole('button', { name: 'Custom practice', exact: true }).click();
   const setup = page.getByRole('dialog', { name: 'Custom practice setup' });
   await setup.getByRole('button', { name: '3 Learning' }).click();
@@ -141,14 +156,18 @@ test('recognition guest attachment preserves selected identity and a legacy reca
   const recognition = page.getByRole('region', { name: 'Location-to-name recognition proficiency' });
   await expect(recognition).toContainText('Learning');
   await expect(recognition.locator('time')).toHaveAttribute('datetime', '2026-09-08T12:10:00.000Z');
-  await page.getByRole('button', { name: 'Recommended practice', exact: true }).click();
+  await page.getByRole('button', { name: 'Custom practice', exact: true }).click();
+  await setup.getByRole('button', { name: '3 Learning' }).click();
+  await setup.getByRole('radio', { name: 'Name-to-location', exact: true }).check();
+  await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeVisible();
   await expect(page.getByText('Scheduled review', { exact: true })).toBeVisible();
   const recall = page.getByRole('region', { name: 'Name-to-location proficiency' });
-  await expect(recall.locator('time')).toHaveAttribute('datetime', '2026-09-07T12:00:00.000Z');
+  await expect(recall.locator('time')).toHaveAttribute('datetime', originalRecallDue);
   await answerWorldPoint(page, -52, -12);
   await expect(recall).toContainText('Retained');
-  await expect(recall.locator('time')).toHaveAttribute('datetime', '2026-09-11T12:00:00.000Z');
+  const recallDue = await recall.locator('time').getAttribute('datetime');
+  expect(Date.parse(recallDue!)).toBeGreaterThan(Date.parse('2026-09-08T12:00:00Z'));
   await page.clock.setFixedTime(new Date('2026-09-08T12:10:00Z'));
   await page.getByRole('button', { name: 'Custom practice', exact: true }).click();
   await setup.getByRole('button', { name: '3 Learning' }).click();
@@ -157,11 +176,15 @@ test('recognition guest attachment preserves selected identity and a legacy reca
   await search.fill('Brazil');
   await page.getByRole('option', { name: 'Brazil', exact: true }).click();
   await page.getByRole('button', { name: 'Check country' }).click();
+  await expect(recognition).toContainText('Familiar');
+  const recognitionDue = await recognition.locator('time').getAttribute('datetime');
+  expect(Date.parse(recognitionDue!)).toBeGreaterThan(Date.parse('2026-09-08T12:10:00Z'));
   await page.getByRole('button', { name: 'Profile', exact: true }).click();
   await expect(profile.getByRole('status')).toContainText('Progress synced');
   const device = await browser.newContext();
   try {
     const other = await device.newPage();
+    await other.clock.setFixedTime(new Date('2026-09-08T12:10:00Z'));
     await other.goto('/');
     await other.getByRole('button', { name: 'Profile', exact: true }).click();
     const otherProfile = other.getByRole('dialog', { name: 'Your profile' });
@@ -173,8 +196,15 @@ test('recognition guest attachment preserves selected identity and a legacy reca
     await expect(other.getByRole('status')).toContainText('You selected Brazil');
     const resumed = other.getByRole('region', { name: 'Location-to-name recognition proficiency' });
     await expect(resumed).toContainText('Familiar');
-    await expect(resumed.locator('time')).toHaveAttribute('datetime', '2026-09-09T12:10:00.000Z');
+    await expect(resumed.locator('time')).toHaveAttribute('datetime', recognitionDue!);
     await expect(other.getByLabel('Practice results')).toContainText('4 answered');
+    await other.getByRole('button', { name: 'Custom practice', exact: true }).click();
+    const otherSetup = other.getByRole('dialog', { name: 'Custom practice setup' });
+    await otherSetup.getByRole('button', { name: '3 Learning' }).click();
+    await otherSetup.getByRole('radio', { name: 'Name-to-location', exact: true }).check();
+    await other.clock.setFixedTime(new Date(recallDue!));
+    await otherSetup.getByRole('button', { name: 'Start practice', exact: true }).click();
+    await expect(other.getByRole('region', { name: 'Name-to-location proficiency' }).locator('time')).toHaveAttribute('datetime', recallDue!);
   } finally {
     await device.close();
   }
