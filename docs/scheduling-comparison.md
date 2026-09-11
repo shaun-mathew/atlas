@@ -16,6 +16,23 @@ For a fresh learner answering correctly in one sitting, the opening sequence is 
 
 Location recognition uses searchable candidates. Shape recognition uses an isolated silhouette without map context, also answered through searchable candidates. Neither is described as free recall. Recommended practice displays the active skill; Custom practice remains a single-skill, geographically filtered alternative. Fact reading remains unscored. Switching modes preserves paused questions and assistance metadata.
 
+## Curated city and capital introductions
+
+City introductions use the editorial curriculum in `src/city-introductions.ts`, rather than the fact bundle's dataset order. It assigns all 324 cities to four ordered tiers:
+
+1. **Familiar landmarks (40):** recognizable reference points across inhabited continents. New introductions begin London, Tokyo, New York City, Paris, Sydney, Cairo and Rio de Janeiro.
+2. **Regional anchors (79):** expand around those reference points with cities such as Dublin, Kyoto, Marrakesh, Chicago, Santiago and Melbourne.
+3. **Broader coverage (154):** less familiar capitals, secondary cities and capital-role contrasts.
+4. **Specialist places (51):** smaller states, remote islands and administrative centres.
+
+Order within the tiers mixes regions. These are editorial judgments about a useful learning sequence, not measured difficulty, universal familiarity, population or GDP rankings. Geographic filters retain the relative order of eligible cities; a regional session starts with its own familiar reference points rather than requiring worldwide progression.
+
+National-capital name-to-location practice uses the shared city order filtered to the 205 supported capital targets. Country-to-capital location has a separate 38-relationship opening: familiar relationships first, then contrasts such as Australia–Canberra, Canada–Ottawa and Brazil–Brasília. Remaining capitals follow their shared city tiers. This deliberately distinguishes recognizing a city's name from knowing that it is a country's capital; existing role-specific prompts still distinguish multiple capital seats.
+
+Only selection of **unseen** learning items changes. Due reviews still take priority, weak-item practice revisits still interleave, and the dataset order still breaks review ties. Existing unanswered questions, assistance, attempts, proficiency and review dates are preserved. A learner with saved progress will therefore not necessarily see the opening sequence on refresh.
+
+The curriculum references stable city IDs outside the immutable fact release. Reordering introductions does not change geographic facts, assessment tolerance, learning-item identity or content versions. Catalogue additions must be explicitly assigned to a tier; coverage tests exercise introductions through the public learner session for cities and both capital skills.
+
 ## Why FSRS instead of the previous schedule?
 
 | Approach | Strength | Limitation for Atlas |

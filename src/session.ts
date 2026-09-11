@@ -6,6 +6,7 @@ import { facetSelectionSchema, matchesCityFacets, matchesFacets, practiceCandida
 import { boundaryVersion, initialProgress, learningItemKey, progressSchema, type Attempt, type Progress, type SpatialSkill } from './progress';
 import { scheduleReview, type Proficiency } from './scheduler';
 import { cities, citiesById, cityContentVersion, cityDistanceKm, cityToleranceKm, type City } from './cities';
+import { cityIntroductionOrder, capitalIntroductionOrder } from './city-introductions';
 
 const countriesById = new Map(countries.map(country => [country.properties.id, country]));
 const recommendedSkills: readonly SpatialSkill[] = ['name-to-location', 'location-to-name-recognition', 'shape-recognition'];
@@ -14,6 +15,8 @@ type LearningEntity = Pick<Question, 'countryId' | 'cityId'>;
 const countryItems: LearningEntity[] = countries.map(country => ({ countryId: country.properties.id }));
 const countryIntroductions: LearningEntity[] = introductionOrder.map(country => ({ countryId: country.properties.id }));
 const cityItems: LearningEntity[] = cities.map(city => ({ countryId: city.countryId, cityId: city.id }));
+const cityIntroductions: LearningEntity[] = cityIntroductionOrder.map(city => ({ countryId: city.countryId, cityId: city.id }));
+const capitalIntroductions: LearningEntity[] = capitalIntroductionOrder.map(city => ({ countryId: city.countryId, cityId: city.id }));
 
 
 // Attempts are the durable source of skill proficiency and scheduling state.
@@ -417,7 +420,10 @@ export class LearnerSession {
       }
     }
     if (due) return { ...due, skill, kind: 'review' as const, assisted: false };
-    const unseen = (cityPractice ? candidates : countryIntroductions).find(entity => eligible(entity)
+    const introductions = cityPractice
+      ? skill === 'capital-to-location' ? capitalIntroductions : cityIntroductions
+      : countryIntroductions;
+    const unseen = introductions.find(entity => eligible(entity)
       && !recentCountries?.has(entity.countryId)
       && (this.selection || skill === 'name-to-location'
         || (this.learningItems.get(learningItemKey({ ...entity, skill: 'name-to-location' }))?.level ?? 'Learning') !== 'Learning')

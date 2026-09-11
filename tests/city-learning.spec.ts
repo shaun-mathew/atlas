@@ -1,6 +1,123 @@
 import { expect, test } from '@playwright/test';
 import type * as SessionModule from '../src/session';
 import type * as ProgressModule from '../src/progress';
+import type * as CitiesModule from '../src/cities';
+import type { FacetSelection } from '../src/facets';
+
+// Import inside browser callbacks: static imports run in Node, outside the
+// application's clock-controlled realm and browser storage.
+test('curated city and capital introductions cover the catalogue without repeats or omissions', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-11T12:00:00Z'));
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const sessionPath = '/src/session.ts';
+    const citiesPath = '/src/cities.ts';
+    const { LearnerSession } = await import(sessionPath) as typeof SessionModule;
+    const { cities } = await import(citiesPath) as typeof CitiesModule;
+    function introductions(scope: 'cities' | 'capitals', learning: 'name-to-location' | 'capital-to-location') {
+      const learner = new LearnerSession(null);
+      learner.choosePractice({ scope, learning, continent: 'Worldwide', region: 'All regions' });
+      const expected = cities.filter(city => scope === 'cities' || city.capital);
+      const introduced: string[] = [];
+      // Fixed time prevents due reviews; ordinary practice revisits still interleave.
+      for (let question = 0; question < expected.length * 3; question++) {
+        const city = learner.city!;
+        if (learner.questionKind === 'new') introduced.push(city.id);
+        learner.answer(city.longitude, city.latitude);
+        learner.next();
+      }
+      return {
+        introduced,
+        expected: expected.map(city => city.id),
+        names: introduced.map(id => cities.find(city => city.id === id)!.name),
+      };
+    }
+    return {
+      cities: introductions('cities', 'name-to-location'),
+      capitals: introductions('capitals', 'name-to-location'),
+      relationships: introductions('capitals', 'capital-to-location'),
+    };
+  });
+  for (const sequence of Object.values(result)) {
+    expect([...sequence.introduced].sort()).toEqual([...sequence.expected].sort());
+  }
+  // Familiar landmarks precede small administrative centres; this is not dataset order.
+  expect(result.cities.names.slice(0, 7)).toEqual(['London', 'Tokyo', 'New York City', 'Paris', 'Sydney', 'Cairo', 'Rio de Janeiro']);
+  expect(result.cities.names.indexOf('Canberra')).toBeGreaterThan(result.cities.names.indexOf('Sydney'));
+  expect(result.cities.names.indexOf('Oranjestad')).toBeGreaterThan(result.cities.names.indexOf('Canberra'));
+  // Named capitals inherit city familiarity, but relationship recall has its own opening.
+  expect(result.capitals.names.indexOf('Cape Town')).toBeLessThan(result.capitals.names.indexOf('Washington'));
+  expect(result.relationships.names.indexOf('Washington')).toBeLessThan(result.relationships.names.indexOf('Cape Town'));
+  expect(result.relationships.names.indexOf('Canberra')).toBeGreaterThan(result.relationships.names.indexOf('Paris'));
+});
+
+test('geographic filters keep familiar local introductions and respect capital scope', async ({ page }) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const sessionPath = '/src/session.ts';
+    const { LearnerSession } = await import(sessionPath) as typeof SessionModule;
+    function first(selection: FacetSelection) {
+      const learner = new LearnerSession(null);
+      learner.choosePractice(selection);
+      return { name: learner.city!.name, capital: learner.city!.capital, region: learner.country!.properties.region };
+    }
+    return {
+      africa: first({ scope: 'cities', continent: 'Africa', region: 'All regions', learning: 'name-to-location' }),
+      southernAfrica: first({ scope: 'cities', continent: 'Africa', region: 'Southern Africa', learning: 'name-to-location' }),
+      northAmerica: first({ scope: 'cities', continent: 'North America', region: 'Northern America', learning: 'name-to-location' }),
+      northAmericanCapitals: first({ scope: 'capitals', continent: 'North America', region: 'Northern America', learning: 'name-to-location' }),
+      southernCapitalRelationships: first({ scope: 'capitals', continent: 'Africa', region: 'Southern Africa', learning: 'capital-to-location' }),
+    };
+  });
+  expect(result.africa.name).toBe('Cairo');
+  expect(result.southernAfrica).toEqual({ name: 'Cape Town', capital: true, region: 'Southern Africa' });
+  expect(result.northAmerica.name).toBe('New York City');
+  expect(result.northAmericanCapitals).toEqual({ name: 'Washington', capital: true, region: 'Northern America' });
+  expect(result.southernCapitalRelationships).toEqual({ name: 'Pretoria', capital: true, region: 'Southern Africa' });
+});
+
+test('curated introductions preserve old pending cities and defer to their due reviews', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-11T12:00:00Z'));
+  await page.goto('/');
+  const learner = await page.evaluateHandle(async () => {
+    const sessionPath = '/src/session.ts';
+    const citiesPath = '/src/cities.ts';
+    const progressPath = '/src/progress.ts';
+    const { LearnerSession } = await import(sessionPath) as typeof SessionModule;
+    const { cities } = await import(citiesPath) as typeof CitiesModule;
+    const { initialProgress } = await import(progressPath) as typeof ProgressModule;
+    // A pre-curation save may already have introduced the old first city.
+    const city = cities.find(city => city.name === 'Oranjestad')!;
+    const saved = initialProgress();
+    saved.started = true;
+    saved.selection = { scope: 'cities', continent: 'Worldwide', region: 'All regions', learning: 'name-to-location' };
+    saved.current = { countryId: city.countryId, cityId: city.id, skill: 'name-to-location', kind: 'new', assisted: true };
+    return new LearnerSession(null, saved);
+  });
+  expect(await learner.evaluate(session => ({ name: session.city!.name, assisted: session.assisted })))
+    .toEqual({ name: 'Oranjestad', assisted: true });
+  const saved = await learner.evaluate(session => {
+    session.answer(session.city!.longitude, session.city!.latitude);
+    return { progress: session.snapshot(), proficiency: session.proficiency! };
+  });
+  await page.clock.setFixedTime(new Date(saved.proficiency.dueAt));
+  const restored = await page.evaluateHandle(async progress => {
+    const sessionPath = '/src/session.ts';
+    const { LearnerSession } = await import(sessionPath) as typeof SessionModule;
+    return new LearnerSession(null, progress);
+  }, saved.progress);
+  expect(await restored.evaluate(session => session.proficiency)).toEqual(saved.proficiency);
+  expect(await restored.evaluate(session => session.attempts)).toEqual(saved.progress.attempts);
+  expect(await restored.evaluate(session => {
+    session.next();
+    return { name: session.city!.name, kind: session.questionKind };
+  })).toEqual({ name: 'Oranjestad', kind: 'review' });
+  expect(await restored.evaluate(session => {
+    session.answer(session.city!.longitude, session.city!.latitude);
+    session.next();
+    return { name: session.city!.name, kind: session.questionKind };
+  })).toEqual({ name: 'London', kind: 'new' });
+});
 
 test('city scoring uses distance rather than its country boundary and keeps retry review dates', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-09-11T12:00:00Z'));
