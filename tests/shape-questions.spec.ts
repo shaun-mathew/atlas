@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 import type * as SessionModule from '../src/session';
+import type * as ProgressModule from '../src/progress';
+import type * as GeographyModule from '../src/geography';
 
 test.use({ reducedMotion: 'reduce' });
 
@@ -11,13 +13,23 @@ test('a guest identifies a silhouette without location clues and receives dated 
   await setup.getByRole('button', { name: 'Continue', exact: true }).click();
   await setup.getByRole('button', { name: 'Continue', exact: true }).click();
   await setup.getByRole('radio', { name: 'Shape recognition', exact: true }).check();
-  await setup.getByRole('combobox', { name: 'Starting context', exact: true }).selectOption('silhouette');
   await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
   await expect(page.getByRole('img', { name: 'Country silhouette', exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'World map', exact: true })).toBeHidden();
   await expect(page.getByRole('heading', { name: /Brazil/ })).toBeHidden();
   await expect(page.getByRole('region', { name: 'Country fact card' })).toBeHidden();
-  await page.getByRole('combobox', { name: 'Country or territory', exact: true }).selectOption('BRA');
+  const search = page.getByRole('combobox', { name: 'Search countries & territories' });
+  const check = page.getByRole('button', { name: 'Check answer', exact: true });
+  await search.fill('bRÁz');
+  await expect(page.getByRole('option', { name: 'Brazil', exact: true })).toBeVisible();
+  await expect(check).toBeDisabled();
+  await page.getByRole('option', { name: 'Brazil', exact: true }).click();
+  await expect(check).toBeEnabled();
+  await search.fill('no such country');
+  await expect(page.getByRole('option')).toHaveCount(0);
+  await expect(check).toBeDisabled();
+  await search.fill('braz');
+  await page.getByRole('option', { name: 'Brazil', exact: true }).click();
   await page.getByRole('button', { name: 'Check answer', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Correct');
   const card = page.getByRole('region', { name: 'Country fact card' });
@@ -29,7 +41,7 @@ test('a guest identifies a silhouette without location clues and receives dated 
   await expect(card.getByRole('heading', { name: 'Brazil', exact: true })).toBeVisible();
 });
 
-test('rich shape context shows neighboring names without naming the target before feedback', async ({ page }) => {
+test('default shape practice shows only target geometry and reveals the answer after a miss', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Custom practice', exact: true }).click();
   const setup = page.getByRole('dialog', { name: 'Custom practice setup' });
@@ -38,16 +50,29 @@ test('rich shape context shows neighboring names without naming the target befor
   await setup.getByRole('radio', { name: 'Shape recognition', exact: true }).check();
   await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
   const presentation = page.getByRole('region', { name: 'Shape question' });
-  await expect(presentation.getByText('Argentina', { exact: true })).toBeVisible();
+  const silhouette = presentation.getByRole('img', { name: 'Country silhouette', exact: true });
+  await expect(silhouette).toBeVisible();
+  const targetParts = await page.evaluate(async () => {
+    const modulePath = '/src/geography.ts';
+    // Resolve geography in the application's browser realm rather than Node.
+    const { countries } = await import(modulePath) as typeof GeographyModule;
+    const target = countries.find(country => country.properties.id === 'BRA')!;
+    return target.geometry.type === 'Polygon' ? 1 : target.geometry.coordinates.length;
+  });
+  await expect(silhouette.locator('path')).toHaveCount(targetParts);
+  await expect(silhouette.locator('path:not(.shape-target), text')).toHaveCount(0);
+  await expect(presentation.getByText('Argentina', { exact: true })).toBeHidden();
   await expect(presentation.getByText('Brazil', { exact: true })).toBeHidden();
-  await page.getByRole('combobox', { name: 'Country or territory', exact: true }).selectOption('ARG');
+  const search = page.getByRole('combobox', { name: 'Search countries & territories' });
+  await search.fill('argen');
+  await page.getByRole('option', { name: 'Argentina', exact: true }).click();
   await page.getByRole('button', { name: 'Check answer', exact: true }).click();
   await expect(page.getByRole('status')).toContainText('Not quite');
   await expect(page.getByRole('status')).toContainText('Brazil');
   await expect(page.getByRole('region', { name: 'Country fact card' }).getByRole('heading', { name: 'Brazil', exact: true })).toBeVisible();
 });
 
-test('repeated shape misses simplify the recheck without letting an immediate retry postpone it', async ({ page }) => {
+test('repeated shape misses bring review forward without letting later retries postpone it', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
   await page.goto('/');
   const session = await page.evaluateHandle(async () => {
@@ -57,31 +82,49 @@ test('repeated shape misses simplify the recheck without letting an immediate re
     const learner = new LearnerSession(null);
     learner.choosePractice({
       scope: 'countries', continent: 'Worldwide', region: 'All regions',
-      learning: 'shape-recognition', startingContext: 'silhouette',
+      learning: 'shape-recognition',
     });
+    learner.answerCountry('BRA');
+    const practice = learner.snapshot();
+    practice.current = { countryId: 'BRA', skill: 'shape-recognition', kind: 'practice', assisted: false };
+    practice.cursor = practice.attempts.length;
+    learner.replace(practice);
     learner.answerCountry('ARG');
     learner.retry();
     return learner;
   });
-  await page.clock.setFixedTime(new Date('2026-09-07T12:09:00Z'));
-  await session.evaluate(learner => { learner.answerCountry('ARG'); learner.retry(); });
-  expect(await session.evaluate(learner => learner.difficultyContext)).toBe('reduced-context');
   expect(await session.evaluate(learner => learner.proficiency)).toMatchObject({
-    level: 'Learning', dueAt: '2026-09-07T12:10:00.000Z',
+    level: 'Familiar', dueAt: '2026-09-08T12:00:00.000Z',
+  });
+  await page.clock.setFixedTime(new Date('2026-09-07T12:09:00Z'));
+  await session.evaluate(learner => {
+    learner.replace(learner.snapshot());
+    learner.answerCountry('ARG');
+    learner.retry();
+  });
+  expect(await session.evaluate(learner => learner.proficiency)).toMatchObject({
+    level: 'Learning', dueAt: '2026-09-07T12:19:00.000Z',
+  });
+  await page.clock.setFixedTime(new Date('2026-09-07T12:18:00Z'));
+  await session.evaluate(learner => {
+    learner.answerCountry('ARG');
+    learner.retry();
+    learner.answerCountry('ARG');
+    learner.retry();
   });
   await session.evaluate(learner => learner.answerCountry('BRA'));
   expect(await session.evaluate(learner => learner.proficiency)).toMatchObject({
-    level: 'Learning', dueAt: '2026-09-07T12:10:00.000Z',
+    level: 'Learning', dueAt: '2026-09-07T12:19:00.000Z',
   });
-  await page.clock.setFixedTime(new Date('2026-09-07T12:10:00Z'));
+  await page.clock.setFixedTime(new Date('2026-09-07T12:19:00Z'));
   expect(await session.evaluate(learner => {
     learner.next();
-    return { country: learner.country?.properties.id, kind: learner.questionKind, context: learner.difficultyContext };
-  })).toEqual({ country: 'BRA', kind: 'review', context: 'reduced-context' });
+    return { country: learner.country?.properties.id, kind: learner.questionKind };
+  })).toEqual({ country: 'BRA', kind: 'review' });
   await session.dispose();
 });
 
-test('scheduled shape successes reach all contexts while name-to-location keeps its own review', async ({ page }) => {
+test('scheduled shape successes advance retention while name-to-location keeps its own review', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
   await page.goto('/');
   const session = await page.evaluateHandle(async () => {
@@ -93,23 +136,23 @@ test('scheduled shape successes reach all contexts while name-to-location keeps 
     learner.answer(-52, -12);
     learner.choosePractice({
       scope: 'countries', continent: 'Worldwide', region: 'All regions',
-      learning: 'shape-recognition', startingContext: 'rich',
+      learning: 'shape-recognition',
     });
     return learner;
   });
   expect(await session.evaluate(learner => learner.proficiency)).toBeUndefined();
   await session.evaluate(learner => learner.answerCountry('BRA'));
-  for (const [date, context, nextDue] of [
-    ['2026-09-08', 'unlabeled-local', '2026-09-11T12:00:00.000Z'],
-    ['2026-09-11', 'reduced-context', '2026-09-18T12:00:00.000Z'],
-    ['2026-09-18', 'silhouette', '2026-10-02T12:00:00.000Z'],
+  for (const [date, nextDue] of [
+    ['2026-09-08', '2026-09-11T12:00:00.000Z'],
+    ['2026-09-11', '2026-09-18T12:00:00.000Z'],
+    ['2026-09-18', '2026-10-02T12:00:00.000Z'],
   ]) {
     await page.clock.setFixedTime(new Date(`${date}T12:00:00Z`));
     expect(await session.evaluate(learner => {
       learner.replace(learner.snapshot());
       learner.next();
-      return { country: learner.country?.properties.id, kind: learner.questionKind, context: learner.difficultyContext };
-    })).toEqual({ country: 'BRA', kind: 'review', context });
+      return { country: learner.country?.properties.id, kind: learner.questionKind };
+    })).toEqual({ country: 'BRA', kind: 'review' });
     expect(await session.evaluate(learner => {
       learner.answerCountry('BRA');
       return learner.proficiency;
@@ -135,7 +178,7 @@ test('reading facts cannot turn either paused skill for the same country into un
     learner.start();
     learner.choosePractice({
       scope: 'countries', continent: 'Worldwide', region: 'All regions',
-      learning: 'shape-recognition', startingContext: 'rich',
+      learning: 'shape-recognition',
     });
     learner.choosePractice({
       scope: 'countries', continent: 'Worldwide', region: 'All regions', learning: 'country-facts',
@@ -152,20 +195,18 @@ test('reading facts cannot turn either paused skill for the same country into un
   expect(await session.evaluate(learner => {
     learner.choosePractice({
       scope: 'countries', continent: 'Worldwide', region: 'All regions',
-      learning: 'shape-recognition', startingContext: 'rich',
+      learning: 'shape-recognition',
     });
     return learner.assisted;
   })).toBe(true);
   expect(await session.evaluate(learner => {
     learner.answerCountry('BRA');
-    return { proficiency: learner.proficiency, nextContext: learner.nextDifficultyContext };
-  })).toMatchObject({
-    proficiency: { level: 'Learning', dueAt: '2026-09-07T12:10:00.000Z' }, nextContext: 'rich',
-  });
+    return learner.proficiency;
+  })).toMatchObject({ level: 'Learning', dueAt: '2026-09-07T12:10:00.000Z' });
   await session.dispose();
 });
 
-test('mobile keyboard answers keep focus through unlabeled and reduced-context feedback and retry', async ({ page }) => {
+test('mobile keyboard answers keep focus through silhouette feedback and retry', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto('/');
   await page.getByRole('button', { name: 'Custom practice', exact: true }).click();
@@ -173,12 +214,14 @@ test('mobile keyboard answers keep focus through unlabeled and reduced-context f
   await setup.getByRole('button', { name: 'Continue', exact: true }).click();
   await setup.getByRole('button', { name: 'Continue', exact: true }).click();
   await setup.getByRole('radio', { name: 'Shape recognition', exact: true }).check();
-  await setup.getByRole('combobox', { name: 'Starting context', exact: true }).selectOption('unlabeled-local');
   await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
-  await expect(page.getByRole('img', { name: 'Country shape with unlabeled local', exact: true })).toBeVisible();
-  const choice = page.getByRole('combobox', { name: 'Country or territory', exact: true });
-  await choice.focus();
-  await choice.selectOption('BRA');
+  await expect(page.getByRole('img', { name: 'Country silhouette', exact: true })).toBeVisible();
+  const choice = page.getByRole('combobox', { name: 'Search countries & territories' });
+  await choice.fill('u.k.');
+  await expect(page.getByRole('option', { name: 'United Kingdom', exact: true })).toBeVisible();
+  await choice.fill('braz');
+  await choice.press('ArrowDown');
+  await choice.press('Enter');
   await choice.press('Tab');
   await page.keyboard.press('Enter');
   const next = page.getByRole('button', { name: 'Next learning item', exact: true });
@@ -190,11 +233,18 @@ test('mobile keyboard answers keep focus through unlabeled and reduced-context f
   await setup.getByRole('button', { name: '2 Geography' }).click();
   await setup.getByRole('combobox', { name: 'Continent', exact: true }).selectOption('Oceania');
   await setup.getByRole('button', { name: 'Continue', exact: true }).click();
-  await setup.getByRole('combobox', { name: 'Starting context', exact: true }).selectOption('reduced-context');
   await setup.getByRole('button', { name: 'Start practice', exact: true }).click();
-  await expect(page.getByRole('img', { name: 'Country shape with reduced context', exact: true })).toBeVisible();
-  await choice.focus();
-  await choice.selectOption('NZL');
+  await expect(page.getByRole('img', { name: 'Country silhouette', exact: true })).toBeVisible();
+  await choice.fill('u.k.');
+  await expect(page.getByRole('option')).toHaveCount(0);
+  await choice.fill('new zeal');
+  await choice.press('ArrowDown');
+  await choice.press('Escape');
+  await expect(page.getByRole('listbox')).toBeHidden();
+  await choice.press('Enter');
+  await expect(page.getByRole('button', { name: 'Check answer', exact: true })).toBeDisabled();
+  await choice.press('ArrowDown');
+  await choice.press('Enter');
   await choice.press('Tab');
   await page.keyboard.press('Enter');
   await expect(next).toBeFocused();
@@ -204,6 +254,74 @@ test('mobile keyboard answers keep focus through unlabeled and reduced-context f
   await page.keyboard.press('Enter');
   await expect(choice).toBeFocused();
   await expect(page.getByRole('region', { name: 'Country fact card' })).toBeHidden();
+});
+
+test('old context-bearing saves preserve answer identity, feedback, retries, and review scheduling', async ({ page }) => {
+  await page.clock.setFixedTime(new Date('2026-09-07T12:09:00Z'));
+  await page.goto('/');
+  const session = await page.evaluateHandle(async () => {
+    const sessionPath = '/src/session.ts';
+    const progressPath = '/src/progress.ts';
+    // Browser imports share the application's localStorage and fixed clock.
+    const { LearnerSession } = await import(sessionPath) as typeof SessionModule;
+    const { progressSchema, mergeProgress } = await import(progressPath) as typeof ProgressModule;
+    const legacy = {
+      version: 6, started: true, cursor: 0, readingCountryId: null, pausedQuestions: [],
+      selection: {
+        scope: 'countries', continent: 'Worldwide', region: 'All regions',
+        learning: 'shape-recognition', startingContext: 'rich',
+      },
+      current: { countryId: 'BRA', skill: 'shape-recognition', kind: 'new', assisted: false, difficultyContext: 'rich' },
+      attempts: [{
+        countryId: 'BRA', skill: 'shape-recognition', kind: 'new', assisted: false,
+        boundaryVersion: 'natural-earth-5.1.2-50m', factVersion: '2026-09-07',
+        difficultyContext: 'rich', selectedCountryId: 'ARG', selectedCountry: 'Argentina',
+        correct: false, answeredAt: '2026-09-07T12:00:00.000Z',
+      }],
+    };
+    localStorage.setItem('shape-migration', JSON.stringify(legacy));
+    const learner = new LearnerSession('shape-migration');
+    // An already-imported copy must deduplicate against the pre-cutover ID.
+    const imported = progressSchema.parse({
+      ...legacy, attempts: [{ ...legacy.attempts[0], id: 'attempt-0000000000-46f34fefb3e7108b' }],
+    });
+    learner.replace(mergeProgress(imported, learner.snapshot()));
+    return learner;
+  });
+  expect(await session.evaluate(learner => ({
+    answers: learner.attempts.length, feedback: learner.feedback, country: learner.country?.properties.id,
+  }))).toMatchObject({
+    answers: 1, country: 'BRA', feedback: { correct: false, selectedCountryId: 'ARG' },
+  });
+  expect(await session.evaluate(async learner => {
+    const modulePath = '/src/progress.ts';
+    // Merge uses the same browser-realm schema as the restored session.
+    const { mergeProgress, ProgressConflictError } = await import(modulePath) as typeof ProgressModule;
+    const conflicting = learner.snapshot();
+    conflicting.attempts[0].difficultyContext = 'silhouette';
+    try {
+      mergeProgress(learner.snapshot(), conflicting);
+      return false;
+    } catch (error) {
+      return error instanceof ProgressConflictError;
+    }
+  })).toBe(true);
+  await session.evaluate(learner => {
+    learner.retry();
+    learner.answerCountry('ARG');
+    learner.replace(learner.snapshot());
+    learner.retry();
+    learner.answerCountry('BRA');
+  });
+  expect(await session.evaluate(learner => learner.proficiency)).toMatchObject({
+    level: 'Learning', dueAt: '2026-09-07T12:10:00.000Z',
+  });
+  await page.clock.setFixedTime(new Date('2026-09-07T12:10:00Z'));
+  expect(await session.evaluate(learner => {
+    learner.next();
+    return { country: learner.country?.properties.id, kind: learner.questionKind };
+  })).toEqual({ country: 'BRA', kind: 'review' });
+  await session.dispose();
 });
 
 test('a legacy active answer for an unsupported skill remains history while supported practice resumes', async ({ page }) => {

@@ -13,21 +13,11 @@ export const continentRegions = {
   Oceania: ['Australia and New Zealand', 'Melanesia', 'Micronesia', 'Polynesia'],
   'Open ocean': ['Seven seas (open ocean)'],
 };
-export const difficultyContexts = ['rich', 'unlabeled-local', 'reduced-context', 'silhouette'] as const;
-export const difficultyContextSchema = z.enum(difficultyContexts);
-export type DifficultyContext = z.infer<typeof difficultyContextSchema>;
-export const contextLabels: Record<DifficultyContext, string> = {
-  rich: 'Rich context',
-  'unlabeled-local': 'Unlabeled local',
-  'reduced-context': 'Reduced context',
-  silhouette: 'Silhouette',
-};
 export const facetSelectionSchema = z.object({
   scope: z.literal('countries'),
   continent: z.enum(Object.keys(continentRegions) as [keyof typeof continentRegions, ...(keyof typeof continentRegions)[]]),
   region: z.string(),
   learning: z.enum(['name-to-location', 'shape-recognition', 'country-facts']),
-  startingContext: difficultyContextSchema.optional(),
 }).refine(selection => selection.region === 'All regions' || continentRegions[selection.continent].includes(selection.region));
 export type FacetSelection = z.infer<typeof facetSelectionSchema>;
 export const learningLabels = { 'name-to-location': 'Name-to-location', 'shape-recognition': 'Shape recognition', 'country-facts': 'Country fact cards' };

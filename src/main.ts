@@ -10,8 +10,8 @@ import { MapPin } from './map-pin';
 import { GeographyRenderer } from './geography-renderer';
 import { Globe } from './globe';
 import { createFacetSetup } from './facet-setup';
-import { contextLabels, describeFacets, learningLabels } from './facets';
-import { renderShape, shapeDescriptions } from './shape-presentation';
+import { describeFacets, learningLabels } from './facets';
+import { renderShape } from './shape-presentation';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
@@ -21,7 +21,6 @@ app.innerHTML = `
   </section>
   <section id="shape-presentation" aria-label="Shape question" hidden>
     <div id="shape-geography"></div>
-    <p id="shape-description"></p>
     <small>Natural Earth · Public domain</small>
   </section>
   <div id="overview-label" class="linked-map-heading" hidden><span>Regional overview</span></div>
@@ -84,12 +83,13 @@ app.innerHTML = `
         </div>
       </div>
       <p id="guided-note" hidden>Location help used · guided practice, not retention credit.</p>
-      <p id="difficulty-context" class="eyebrow" hidden></p>
       <div class="answer-dock">
         <div id="country-answer" hidden>
-          <label for="country-choice">Country or territory</label>
-          <select id="country-choice" aria-describedby="shape-answer-help"></select>
-          <p id="shape-answer-help">Identify the highlighted shape. Choose a country, then check your answer.</p>
+          <label for="country-search">Search countries & territories</label>
+          <p id="search-instructions">Name the shape. Type to filter, then select a result. Use ↑ and ↓ to browse and Enter to select.</p>
+          <input id="country-search" type="search" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="country-results" aria-describedby="search-instructions" autocomplete="off" spellcheck="false">
+          <ul id="country-results" role="listbox" aria-label="Matching countries & territories" hidden></ul>
+          <p id="search-summary" aria-live="polite"></p>
         </div>
         <div id="feedback" role="status" aria-live="polite"></div>
         <section id="proficiency" aria-label="Name-to-location proficiency" hidden>
@@ -160,11 +160,12 @@ const feedback = document.querySelector<HTMLDivElement>('#feedback')!;
 const factCard = document.querySelector<HTMLElement>('#country-fact-card')!;
 const check = document.querySelector<HTMLButtonElement>('#check')!;
 const next = document.querySelector<HTMLButtonElement>('#next')!;
-const countryChoice = document.querySelector<HTMLSelectElement>('#country-choice')!;
-countryChoice.replaceChildren(new Option('Choose a country or territory', ''),
-  ...[...countries].sort((a, b) => a.properties.name.localeCompare(b.properties.name))
-    .map(country => new Option(country.properties.name, country.properties.id)));
-countryChoice.options[0].disabled = true;
+let selectedCountryId: string | null = null;
+let searchResults: Country[] = [];
+let activeResult = -1;
+const countrySearch = document.querySelector<HTMLInputElement>('#country-search')!;
+const countryResults = document.querySelector<HTMLElement>('#country-results')!;
+const searchSummary = document.querySelector<HTMLElement>('#search-summary')!;
 const shapePresentation = document.querySelector<HTMLElement>('#shape-presentation')!;
 const retry = document.querySelector<HTMLButtonElement>('#retry')!;
 const storageNotice = document.querySelector<HTMLParagraphElement>('#storage-notice')!;
@@ -438,10 +439,10 @@ function renderQuestion(animate = true) {
   shapePresentation.hidden = !shape;
   document.querySelector<HTMLElement>('.location-tools')!.hidden = shape;
   document.querySelector<HTMLElement>('#country-answer')!.hidden = !shape || !!session.feedback;
-  countryChoice.value = '';
-  document.querySelector<HTMLElement>('#difficulty-context')!.hidden = !shape;
-  document.querySelector('#difficulty-context')!.textContent = shape
-    ? `${contextLabels[session.difficultyContext!]}${session.feedback ? ` · Next shape check: ${contextLabels[session.nextDifficultyContext!]}` : ''}` : '';
+  selectedCountryId = null;
+  countrySearch.value = '';
+  closeCountryResults();
+  searchSummary.textContent = '';
   document.querySelector('.prompt')!.textContent = shape ? 'Which country is' : 'Where is';
   app.classList.toggle('is-reading', reading);
   const selectedFacets = session.selection;
@@ -555,8 +556,7 @@ function renderQuestion(animate = true) {
   }
   fitCountryHeading();
   if (shape && country) {
-    renderShape(document.querySelector<HTMLElement>('#shape-geography')!, country, session.difficultyContext!);
-    document.querySelector('#shape-description')!.textContent = shapeDescriptions[session.difficultyContext!];
+    renderShape(document.querySelector<HTMLElement>('#shape-geography')!, country);
     return;
   }
   const spatialAnswer = answer && answer.longitude !== undefined && answer.latitude !== undefined
@@ -597,6 +597,73 @@ function selectPoint(point: L.LatLng) {
   feedback.textContent = `${Math.abs(point.lat).toFixed(1)}° ${point.lat >= 0 ? 'N' : 'S'} / ${Math.abs(point.lng).toFixed(1)}° ${point.lng >= 0 ? 'E' : 'W'}`;
   check.disabled = false;
 }
+function closeCountryResults() {
+  countryResults.hidden = true;
+  countryResults.replaceChildren();
+  countrySearch.setAttribute('aria-expanded', 'false');
+  countrySearch.removeAttribute('aria-activedescendant');
+  activeResult = -1;
+}
+
+function renderCountryResults() {
+  searchResults = session.searchCountries(countrySearch.value);
+  activeResult = -1;
+  countrySearch.removeAttribute('aria-activedescendant');
+  countryResults.replaceChildren(...searchResults.map(country => {
+    const option = document.createElement('li');
+    option.id = `country-option-${country.properties.id}`;
+    option.role = 'option';
+    option.dataset.countryId = country.properties.id;
+    option.setAttribute('aria-selected', String(country.properties.id === selectedCountryId));
+    option.textContent = country.properties.name;
+    return option;
+  }));
+  countryResults.hidden = false;
+  countrySearch.setAttribute('aria-expanded', 'true');
+  searchSummary.textContent = searchResults.length ? `${searchResults.length} matching countries & territories` : 'No matching countries or territories in this practice set.';
+}
+
+function selectCountryResult(country: Country) {
+  selectedCountryId = country.properties.id;
+  countrySearch.value = country.properties.name;
+  closeCountryResults();
+  searchSummary.textContent = `${country.properties.name} selected. Ready to check.`;
+  check.disabled = false;
+}
+
+countrySearch.addEventListener('input', () => {
+  selectedCountryId = null;
+  check.disabled = true;
+  renderCountryResults();
+});
+countrySearch.addEventListener('focus', renderCountryResults);
+countrySearch.addEventListener('blur', closeCountryResults);
+countrySearch.addEventListener('keydown', event => {
+  if (event.isComposing) return;
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeCountryResults();
+  } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    if (countryResults.hidden) renderCountryResults();
+    if (!searchResults.length) return;
+    activeResult = (activeResult + (event.key === 'ArrowDown' ? 1 : activeResult < 0 ? 0 : -1) + searchResults.length) % searchResults.length;
+    const options = Array.from(countryResults.children) as HTMLElement[];
+    options.forEach((option, index) => option.setAttribute('aria-selected', String(index === activeResult)));
+    countrySearch.setAttribute('aria-activedescendant', options[activeResult].id);
+    options[activeResult].scrollIntoView({ block: 'nearest' });
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    if (!countryResults.hidden && activeResult >= 0) selectCountryResult(searchResults[activeResult]);
+  }
+});
+countryResults.addEventListener('pointerdown', event => { event.preventDefault(); });
+countryResults.addEventListener('click', event => {
+  const option = (event.target as HTMLElement).closest<HTMLElement>('[role="option"]');
+  const country = searchResults.find(result => result.properties.id === option?.dataset.countryId);
+  if (country) selectCountryResult(country);
+});
+
 map.on('click', (event: L.LeafletMouseEvent) => {
   if (linkedOpen) return;
   // Leaflet commits the target projection before its CSS zoom is visible.
@@ -612,13 +679,12 @@ document.querySelector('#start')!.addEventListener('click', () => {
   linkedOpen = false;
   renderQuestion();
 });
-countryChoice.addEventListener('change', () => {
-  check.disabled = !countryChoice.value || !!session.feedback;
-});
 check.addEventListener('click', () => {
   if (session.feedback) return;
-  if (session.recognizingShape) session.answerCountry(countryChoice.value);
-  else if (pendingPoint) session.answer(pendingPoint.lng, pendingPoint.lat);
+  if (session.recognizingShape) {
+    if (!selectedCountryId) return;
+    session.answerCountry(selectedCountryId);
+  } else if (pendingPoint) session.answer(pendingPoint.lng, pendingPoint.lat);
   else return;
   renderQuestion();
   if (session.recognizingShape && session.feedback) next.focus();
@@ -627,14 +693,14 @@ next.addEventListener('click', () => {
   session.next();
   linkedOpen = false;
   renderQuestion();
-  if (session.recognizingShape) countryChoice.focus();
+  if (session.recognizingShape) countrySearch.focus();
   if (globeOpen) globe?.reset();
 });
 retry.addEventListener('click', () => {
   session.retry();
   linkedOpen = session.assisted;
   renderQuestion();
-  if (session.recognizingShape) countryChoice.focus();
+  if (session.recognizingShape) countrySearch.focus();
 });
 document.querySelector('#location-help')!.addEventListener('click', () => {
   session.requestLocationHelp();

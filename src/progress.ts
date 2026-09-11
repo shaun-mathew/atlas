@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { countries, introductionOrder } from './geography';
-import { difficultyContexts, difficultyContextSchema, facetSelectionSchema, matchesFacets } from './facets';
+import { facetSelectionSchema, matchesFacets } from './facets';
 
 export const boundaryVersion = 'natural-earth-5.1.2-50m';
 const firstFactVersion = '2026-09-07';
@@ -11,7 +11,6 @@ const previousKindSchema = questionKindSchema.or(z.literal('diagnostic'))
 const questionSchema = z.object({
   countryId: countryIdSchema,
   skill: z.enum(['name-to-location', 'shape-recognition']).optional(),
-  difficultyContext: difficultyContextSchema.optional(),
   kind: questionKindSchema,
   assisted: z.boolean().default(false),
 });
@@ -25,7 +24,9 @@ const attemptSchema = z.object({
   longitude: z.number().min(-180).max(180).optional(),
   latitude: z.number().min(-90).max(90).optional(),
   selectedCountryId: countryIdSchema.optional(),
-  difficultyContext: difficultyContextSchema.optional(),
+  // Retain old presentation metadata only on immutable history: it contributes
+  // to migrated IDs and same-ID conflict checks, not current practice behavior.
+  difficultyContext: z.enum(['rich', 'unlabeled-local', 'reduced-context', 'silhouette']).optional(),
   correct: z.boolean(),
   assisted: z.boolean().default(false),
   selectedCountry: z.string().max(256).nullable(),
@@ -141,13 +142,10 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
         && (!readingCountry || !matchesFacets(readingCountry, state.selection)))
       || state.attempts.some(attempt => attempt.skill === 'name-to-location'
         ? attempt.longitude === undefined || attempt.latitude === undefined
-        : attempt.skill === 'shape-recognition' && (!attempt.difficultyContext || !attempt.selectedCountryId))
-      || [...state.pausedQuestions, ...(state.current ? [state.current] : [])]
-        .some(question => question.skill === 'shape-recognition' && !question.difficultyContext)
+        : attempt.skill === 'shape-recognition' && !attempt.selectedCountryId)
       || (answer && (answer.countryId !== state.current?.countryId || answer.kind !== state.current.kind
         || ((answer.skill === 'name-to-location' || answer.skill === 'shape-recognition')
-          && answer.skill !== (state.current.skill ?? 'name-to-location'))
-        || (answer.skill === 'shape-recognition' && answer.difficultyContext !== state.current.difficultyContext)))) {
+          && answer.skill !== (state.current.skill ?? 'name-to-location'))))) {
       context.addIssue({ code: 'custom', message: 'Progress has an inconsistent active question or answer.' });
     }
   }).transform((state, context): Progress => {
@@ -169,8 +167,8 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
     };
   });
 
-// Unfinished prompts merge per learning item, never across skills. Keep the
-// easiest context exposed and never turn retry/practice into retention.
+// Unfinished prompts merge per learning item, never across skills, and never
+// turn retry/practice into retention.
 const kindRank: Record<Question['kind'], number> = { retry: 0, practice: 1, new: 2, review: 3 };
 function mergeQuestion(left: Question, right: Question): Question {
   return {
@@ -178,11 +176,6 @@ function mergeQuestion(left: Question, right: Question): Question {
     countryId: left.countryId,
     kind: kindRank[left.kind] < kindRank[right.kind] ? left.kind : right.kind,
     assisted: left.assisted || right.assisted,
-    ...(left.skill === 'shape-recognition' ? {
-      difficultyContext: difficultyContexts[Math.min(
-        difficultyContexts.indexOf(left.difficultyContext!), difficultyContexts.indexOf(right.difficultyContext!),
-      )],
-    } : {}),
   };
 }
 
