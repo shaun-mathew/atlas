@@ -56,10 +56,10 @@ app.innerHTML = `
   </div>
   </div>
   </div>
+    <button id="change-quiz" class="secondary quiz-trigger" type="button" aria-haspopup="dialog" aria-controls="quiz-chooser" aria-expanded="false"><span><small>Change quiz</small><span id="current-quiz">Countries & territories</span></span><span aria-hidden="true">⌄</span></button>
     <button id="reset-map" class="secondary" type="button" aria-label="World view" title="World view"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg></button>
   <p id="progress" class="progress" aria-label="Practice results"><span class="progress-stat"><span id="answered-count">0</span> answered</span> <span class="progress-divider">·</span> <span class="progress-stat"><span id="correct-count">0</span> correct</span><span id="guided-count" hidden></span></p>
   <div class="session-panel">
-    <button id="change-quiz" class="secondary quiz-trigger" type="button" aria-haspopup="dialog" aria-controls="quiz-chooser" aria-expanded="false"><span><small>Change quiz</small><span id="current-quiz">Countries & territories</span></span><span aria-hidden="true">⌄</span></button>
     <section id="current-facets" class="current-facets" aria-label="Current practice selection" hidden>
       <p id="current-facet-description"></p>
       <button id="edit-facets" class="secondary" type="button">Edit practice set</button>

@@ -1,4 +1,4 @@
-:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-synthesis: none; color: #f5f4e9; background: #111e29; --accent: #d6ed8b; --muted: #aab8bf; }
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; font-synthesis: none; color: #f5f4e9; background: #111e29; --accent: #d6ed8b; --muted: #aab8bf; --practice-content-top: calc(238px + env(safe-area-inset-top, 0px)); }
 * { box-sizing: border-box; }
 body { margin: 0; }
 [hidden] { display: none !important; }
@@ -28,7 +28,7 @@ button:focus-visible, a:focus-visible, summary:focus-visible, .fact-card:focus-v
 .progress-stat > span { margin-right: 4px; color: #f5f4e9; font-family: ui-monospace, monospace; font-size: 21px; font-variant-numeric: tabular-nums; }
 .progress #correct-count { color: var(--accent); }
 .progress-divider { margin: 0 16px; color: #ffffff50; }
-.session-panel { position: absolute; z-index: 3; top: calc(170px + env(safe-area-inset-top, 0px)); left: 38px; width: 360px; max-height: calc(100dvh - 200px - env(safe-area-inset-top, 0px)); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #536570 transparent; }
+.session-panel { position: absolute; z-index: 3; top: var(--practice-content-top); left: 38px; width: 360px; max-height: calc(100dvh - var(--practice-content-top) - 30px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #536570 transparent; }
 .eyebrow { display: flex; align-items: center; gap: 9px; margin: 0; color: var(--muted); font: 10px/16px ui-monospace, monospace; text-transform: uppercase; letter-spacing: 1.4px; }
 .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 #question-number { margin-left: auto; color: #dce4e5; letter-spacing: 0; }
@@ -120,6 +120,7 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 #country-results [role="option"]:hover, #country-results [aria-selected="true"] { background: #324738; color: #e3f5b1; }
 .is-recognizing #map, .is-recognizing #detail-map { cursor: grab; }
 @media (max-width: 700px) {
+  :root { --practice-content-top: calc(180px + env(safe-area-inset-top, 0px)); }
   .map-shade { background: linear-gradient(180deg, #0b1521b3, transparent 24%, transparent 56%, #0b15214d); }
   .app-header { top: calc(18px + env(safe-area-inset-top, 0px)); left: 18px; right: 18px; justify-content: space-between; gap: 12px; }
   .brand { gap: 8px; font-size: 17px; }
@@ -130,7 +131,7 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
   .progress { top: calc(78px + env(safe-area-inset-top, 0px)); left: auto; right: 18px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; width: 96px; font-size: 10px; }
   .progress-stat > span { font-size: 14px; }
   .progress-divider { display: none; }
-  .session-panel { top: auto; left: 12px; right: 12px; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: auto; max-height: min(58dvh, calc(100dvh - 160px)); padding: 19px 19px 16px; border: 1px solid #ffffff24; border-radius: 21px; background: #14242ef5; box-shadow: 0 14px 42px #00000038, inset 0 1px 0 #ffffff07; }
+  .session-panel { top: auto; left: 12px; right: 12px; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); width: auto; max-height: min(58dvh, calc(100dvh - var(--practice-content-top) - 20px - env(safe-area-inset-bottom, 0px))); padding: 19px 19px 16px; border: 1px solid #ffffff24; border-radius: 21px; background: #14242ef5; box-shadow: 0 14px 42px #00000038, inset 0 1px 0 #ffffff07; }
   .eyebrow { gap: 7px; font-size: 9px; letter-spacing: 1.1px; }
   .prompt { display: inline-block; margin: 15px 7px 0 0; font-size: 20px; letter-spacing: -0.7px; }
   #session h1 { display: inline; font-size: 37px; line-height: 1.2; letter-spacing: -1.7px; }
@@ -155,7 +156,7 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 #linked-detail { position: absolute; z-index: 0; top: 120px; bottom: 32px; left: calc(50% + 165px); right: 24px; }
 .has-linked-maps #map { top: 164px; bottom: 32px; left: 330px; width: calc((100% - 378px) / 2); border: 1px solid #637b8b; border-radius: 14px; }
 .has-linked-maps .map-shade, .has-linked-maps .map-caption, .has-linked-maps .map-grid { display: none; }
-.has-linked-maps .session-panel { top: 160px; left: 24px; width: 280px; max-height: calc(100dvh - 184px); }
+.has-linked-maps .session-panel { top: var(--practice-content-top); left: 24px; width: 280px; max-height: calc(100dvh - var(--practice-content-top) - 24px); }
 .has-linked-maps h1 { font-size: 46px; }
 .has-linked-maps .prompt { margin-top: 20px; font-size: 20px; }
 .has-linked-maps .location-tools .secondary { min-height: 36px; padding: 0 9px; font-size: 10px; }
@@ -179,9 +180,9 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
   .has-linked-maps #session h1 { display: inline; font-size: 34px; letter-spacing: -1px; }
   .has-linked-maps .eyebrow { margin-bottom: 9px; }
   .has-linked-maps .answer-dock { padding: 0; margin-top: 12px; border: 0; box-shadow: none; background: none; }
-  .has-linked-maps #map { top: 158px; bottom: calc(38dvh + 48px); left: 16px; width: calc(50% - 24px); }
-  .has-linked-maps #overview-label { top: 120px; left: 16px; }
-  .has-linked-maps #linked-detail { top: 120px; bottom: calc(38dvh + 48px); left: calc(50% + 8px); right: 16px; }
+  .has-linked-maps #map { top: calc(var(--practice-content-top) + 38px); bottom: calc(38dvh + 48px); left: 16px; width: calc(50% - 24px); }
+  .has-linked-maps #overview-label { top: var(--practice-content-top); left: 16px; }
+  .has-linked-maps #linked-detail { top: var(--practice-content-top); bottom: calc(38dvh + 48px); left: calc(50% + 8px); right: 16px; }
   #detail-map { top: 38px; }
   .linked-map-heading span { font-size: 9px; }
   .has-linked-maps .session-panel.is-answered { display: block; overflow-y: auto; }
@@ -192,25 +193,25 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 }
 @media (max-width: 600px) {
   .has-linked-maps .session-panel { bottom: 16px; left: 12px; right: 12px; max-height: 30dvh; padding: 14px; }
-  .has-linked-maps #overview-label { top: 117px; left: 16px; }
-  .has-linked-maps #map { top: 140px; bottom: auto; height: calc((100dvh - 450px) / 2); left: 12px; right: 12px; width: auto; }
-  .has-linked-maps #linked-detail { top: calc(153px + (100dvh - 450px) / 2); bottom: calc(30dvh + 38px); left: 12px; right: 12px; }
+  .has-linked-maps #overview-label { top: var(--practice-content-top); left: 16px; }
+  .has-linked-maps #map { top: calc(var(--practice-content-top) + 23px); bottom: auto; height: calc((100dvh - var(--practice-content-top) - 333px) / 2); left: 12px; right: 12px; width: auto; }
+  .has-linked-maps #linked-detail { top: calc(var(--practice-content-top) + 36px + (100dvh - var(--practice-content-top) - 333px) / 2); bottom: calc(30dvh + 38px); left: 12px; right: 12px; }
   #detail-map { top: 23px; }
   .has-linked-maps .location-tools { margin-top: 10px; }
 }
 
 /* Short viewports scroll the practice flow instead of collapsing either map. */
 @media (max-height: 700px) {
-  #app.has-linked-maps { height: auto; min-height: 100dvh; padding-top: 460px; overflow: visible; }
+  #app.has-linked-maps { height: auto; min-height: 100dvh; padding-top: calc(var(--practice-content-top) + 340px); overflow: visible; }
   .has-linked-maps #map { bottom: auto; height: 280px; }
   .has-linked-maps #linked-detail { bottom: auto; height: 318px; }
   .has-linked-maps .session-panel { position: relative; bottom: auto; left: auto; right: auto; max-height: none; margin: 0 16px 16px; }
   .has-linked-maps .session-panel.is-answered { overflow: visible; }
 }
 @media (max-width: 600px) and (max-height: 700px) {
-  #app.has-linked-maps { padding-top: 552px; }
+  #app.has-linked-maps { padding-top: calc(var(--practice-content-top) + 435px); }
   .has-linked-maps #map { height: 180px; }
-  .has-linked-maps #linked-detail { top: 333px; height: 203px; }
+  .has-linked-maps #linked-detail { top: calc(var(--practice-content-top) + 216px); height: 203px; }
   .has-linked-maps .session-panel { margin-right: 12px; margin-left: 12px; }
 }
 
@@ -232,8 +233,8 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 .globe-attribution { position: absolute; bottom: 4px; right: 8px; color: var(--muted); font-size: 9px; pointer-events: none; }
 .has-globe .map-shade { display: none; }
 @media (max-width: 1000px), (max-height: 700px) {
-  #app.has-globe { height: auto; min-height: 100dvh; padding-top: calc(180px + min(42dvh, 400px)); overflow: visible; }
-  #globe { top: 160px; left: 12px; right: 12px; bottom: auto; height: min(42dvh, 400px); min-height: 220px; }
+  #app.has-globe { height: auto; min-height: 100dvh; padding-top: calc(var(--practice-content-top) + 20px + min(42dvh, 400px)); overflow: visible; }
+  #globe { top: var(--practice-content-top); left: 12px; right: 12px; bottom: auto; height: min(42dvh, 400px); min-height: 220px; }
   .has-globe .session-panel { position: relative; top: auto; bottom: auto; left: auto; right: auto; width: auto; max-height: none; margin: 0 12px 16px; padding: 16px; border: 1px solid #63777f66; border-radius: 16px; background: #14242e; }
   .has-globe .session-panel.is-answered, .has-globe .is-answered #session, .has-globe .is-answered .answer-dock { display: block; overflow: visible; }
   .has-globe .fact-card { max-height: 230px; }
@@ -245,18 +246,18 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
   #reset-map { position: absolute; top: var(--map-control-top); right: var(--map-control-right, 12px); bottom: auto; }
 }
 @media (max-height: 520px) {
-  #app.has-globe { padding-top: 400px; }
+  #app.has-globe { padding-top: calc(var(--practice-content-top) + 240px); }
 }
 @media (max-width: 1000px), (max-height: 700px) {
-  #app.is-recognizing.has-linked-maps { height: auto; min-height: 100dvh; padding-top: 460px; overflow: visible; }
+  #app.is-recognizing.has-linked-maps { height: auto; min-height: 100dvh; padding-top: calc(var(--practice-content-top) + 340px); overflow: visible; }
   .is-recognizing.has-linked-maps #map { bottom: auto; height: 280px; }
   .is-recognizing.has-linked-maps #linked-detail { bottom: auto; height: 318px; }
   .is-recognizing.has-linked-maps .session-panel { position: relative; bottom: auto; left: auto; right: auto; max-height: none; margin: 0 16px 16px; }
 }
 @media (max-width: 600px) {
-  #app.is-recognizing.has-linked-maps { padding-top: 552px; }
+  #app.is-recognizing.has-linked-maps { padding-top: calc(var(--practice-content-top) + 435px); }
   .is-recognizing.has-linked-maps #map { height: 180px; }
-  .is-recognizing.has-linked-maps #linked-detail { top: 333px; height: 203px; }
+  .is-recognizing.has-linked-maps #linked-detail { top: calc(var(--practice-content-top) + 216px); height: 203px; }
   .is-recognizing.has-linked-maps .session-panel { margin-right: 12px; margin-left: 12px; }
 }
 
@@ -268,19 +269,19 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 .shape-target { fill: #d6ed8b; stroke: #eff9ce; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
 #shape-presentation > small { color: var(--muted); font-size: 9px; }
 @media (max-width: 1000px), (max-height: 700px) {
-  #app.has-shape { height: auto; min-height: 100dvh; padding-top: calc(190px + min(42dvh, 400px)); overflow: visible; }
-  #shape-presentation { top: 160px; left: 12px; right: 12px; bottom: auto; height: min(42dvh, 400px); min-height: 240px; padding: 12px; }
+  #app.has-shape { height: auto; min-height: 100dvh; padding-top: calc(var(--practice-content-top) + 30px + min(42dvh, 400px)); overflow: visible; }
+  #shape-presentation { top: var(--practice-content-top); left: 12px; right: 12px; bottom: auto; height: min(42dvh, 400px); min-height: 240px; padding: 12px; }
   .has-shape .session-panel { position: relative; top: auto; bottom: auto; left: auto; right: auto; width: auto; max-height: none; margin: 0 12px 16px; padding: 16px; border: 1px solid #63777f66; border-radius: 16px; background: #14242e; }
   .has-shape .session-panel.is-answered, .has-shape .is-answered #session, .has-shape .is-answered .answer-dock { display: block; overflow: visible; }
   .has-shape .fact-card { max-height: 260px; }
   .has-shape .is-answered #next { position: sticky; bottom: 8px; }
 }
 @media (max-height: 570px) {
-  #app.has-shape { padding-top: 420px; }
+  #app.has-shape { padding-top: calc(var(--practice-content-top) + 260px); }
 }
 
-/* The quiz chooser stays beside the question, without dimming the map. */
-.quiz-trigger.secondary { display: flex; align-items: center; justify-content: space-between; gap: 24px; max-width: 100%; min-height: 44px; margin-bottom: 16px; padding: 8px 12px; background: #14242ee8; text-align: left; flex-shrink: 0; }
+/* Quiz navigation stays above the question panel across map and quiz layouts. */
+.quiz-trigger.secondary { position: absolute; z-index: 3; top: calc(170px + env(safe-area-inset-top, 0px)); left: 38px; display: flex; align-items: center; justify-content: space-between; gap: 24px; width: 200px; max-width: calc(100% - 36px); min-height: 44px; padding: 8px 12px; background: #14242ee8; text-align: left; }
 .quiz-trigger small { display: block; margin-bottom: 3px; color: var(--muted); font-size: 9px; font-weight: 400; }
 .quiz-chooser { position: fixed; inset: auto; margin: 0; width: min(340px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 18px; border-radius: 12px; box-shadow: 0 16px 48px #0007; }
 .quiz-chooser::backdrop { background: transparent; }
@@ -299,7 +300,7 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
 .has-city .globe-attribution { max-width: 100%; text-align: right; pointer-events: auto; }
 .globe-attribution a { color: inherit; }
 @media (max-width: 700px) {
-  .quiz-trigger.secondary { min-height: 38px; margin-bottom: 12px; padding: 6px 10px; }
+  .quiz-trigger.secondary { top: calc(120px + env(safe-area-inset-top, 0px)); left: 18px; min-height: 38px; padding: 6px 10px; }
   .has-city .session-panel { padding: 16px; }
   .has-city .session-panel.is-answered { display: block; overflow-y: auto; }
   .has-city .is-answered #session, .has-city .is-answered .answer-dock { display: block; overflow: visible; }
