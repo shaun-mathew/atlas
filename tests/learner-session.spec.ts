@@ -52,7 +52,7 @@ test('an older save with an unsupported active skill keeps its history and resum
   await expect(page.getByRole('status')).toContainText('Correct');
 });
 
-test('a guest starts with country recall before recommended practice introduces recognition', async ({ page }) => {
+test('a guest stays with country recall while building initial familiarity', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));
   await page.goto('/');
   await page.getByRole('button', { name: 'Start country session' }).click();
@@ -67,15 +67,10 @@ test('a guest starts with country recall before recommended practice introduces 
   await answerWorldPoint(page, 0, 0);
   await page.getByRole('button', { name: 'Next learning item' }).click();
   await page.reload();
-  // Brazil's recall unlocked recognition, but only after two other answers.
-  await expect(page.getByRole('heading', { name: /Brazil/ })).toBeHidden();
-  await expect(page.getByRole('button', { name: 'Check location' })).toBeHidden();
-  await page.getByRole('combobox', { name: 'Search countries & territories' }).fill('Brazil');
-  await page.getByRole('option', { name: 'Brazil', exact: true }).click();
-  await page.getByRole('button', { name: 'Check country' }).click();
-  await expect(page.getByRole('status')).toContainText('Correct');
-  await expect(page.getByRole('region', { name: 'Location-to-name recognition proficiency' })).toContainText('Familiar');
-  await expect(page.getByText('4 answered · 2 correct', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Check location' })).toBeVisible();
+  await expect(page.getByRole('combobox', { name: 'Search countries & territories' })).toBeHidden();
+  await expect(page.getByRole('img', { name: 'Country silhouette' })).toBeHidden();
+  await expect(page.getByText('3 answered · 1 correct', { exact: true })).toBeVisible();
 });
 test('a completed legacy diagnostic resumes continuous practice with its learning history', async ({ page }) => {
   await page.clock.setFixedTime(new Date('2026-09-08T12:00:00Z'));

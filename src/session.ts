@@ -10,6 +10,7 @@ import { cityIntroductionOrder, capitalIntroductionOrder } from './city-introduc
 
 const countriesById = new Map(countries.map(country => [country.properties.id, country]));
 const recommendedSkills: readonly SpatialSkill[] = ['name-to-location', 'location-to-name-recognition', 'shape-recognition'];
+const recognitionFamiliarCountryCount = 40;
 type Question = NonNullable<Progress['current']>;
 type LearningEntity = Pick<Question, 'countryId' | 'cityId'>;
 const countryItems: LearningEntity[] = countries.map(country => ({ countryId: country.properties.id }));
@@ -368,24 +369,33 @@ export class LearnerSession {
       recentCountries.add(attempt.countryId);
       recentAnswers++;
     }
-    let selected: Question | undefined;
-    for (const skill of recommendedSkills) {
-      const candidate = this.selectAdaptive(now, skill, recentCountries);
-      if (!candidate) continue;
-      if (!selected
-        || (candidate.kind === 'review' && (selected.kind !== 'review'
-          || this.learningItems.get(learningItemKey(candidate))!.dueAt < this.learningItems.get(learningItemKey(selected))!.dueAt))
-        || (candidate.kind !== 'review' && selected.kind !== 'review'
-          && (this.selectionCounts.get(skill)?.attempts ?? 0) < (this.selectionCounts.get(selected.skill)?.attempts ?? 0))) {
-        selected = candidate;
-      }
+    let familiarCountries = 0;
+    for (const entity of countryItems) {
+      const level = this.learningItems.get(learningItemKey({ ...entity, skill: 'name-to-location' }))?.level;
+      if (level === 'Familiar' || level === 'Retained') familiarCountries++;
+      if (familiarCountries >= recognitionFamiliarCountryCount) break;
     }
-    // Name-to-location always has an unseen or previously seen country outside
-    // the two-answer exclusion, even before any recognition skills unlock.
-    return selected!;
+    // Rotate from the latest supported country answer, including after reload.
+    // Lifetime counts make newly unlocked skills monopolize practice while
+    // catching up with recall. Reviews take priority within each skill's turn.
+    let previousSkillIndex = -1;
+    for (let index = this.attempts.length - 1; index >= 0; index--) {
+      const attempt = this.attempts[index];
+      if (attempt.cityId !== undefined || !this.supportsAttempt(attempt)) continue;
+      previousSkillIndex = recommendedSkills.findIndex(skill => skill === attempt.skill);
+      break;
+    }
+    for (let offset = 1; offset <= recommendedSkills.length; offset++) {
+      const skill = recommendedSkills[(previousSkillIndex + offset) % recommendedSkills.length];
+      const candidate = this.selectAdaptive(now, skill, recentCountries,
+        skill === 'name-to-location' || familiarCountries >= recognitionFamiliarCountryCount);
+      if (candidate) return candidate;
+    }
+    // Recall always has a country outside the two-answer exclusion.
+    return this.selectAdaptive(now, 'name-to-location', recentCountries)!;
   }
 
-  private selectAdaptive(now: string, skill: SpatialSkill, recentCountries?: ReadonlySet<string>): Question | undefined {
+  private selectAdaptive(now: string, skill: SpatialSkill, recentCountries?: ReadonlySet<string>, allowIntroductions = true): Question | undefined {
     const cityPractice = this.selection !== null && this.selection.scope !== 'countries';
     const counts = this.selectionCounts.get(cityPractice ? `city:${skill}` : skill);
     const eligible = (entity: LearningEntity) => !this.selection || (entity.cityId === undefined
@@ -423,11 +433,11 @@ export class LearnerSession {
     const introductions = cityPractice
       ? skill === 'capital-to-location' ? capitalIntroductions : cityIntroductions
       : countryIntroductions;
-    const unseen = introductions.find(entity => eligible(entity)
+    const unseen = allowIntroductions ? introductions.find(entity => eligible(entity)
       && !recentCountries?.has(entity.countryId)
       && (this.selection || skill === 'name-to-location'
         || (this.learningItems.get(learningItemKey({ ...entity, skill: 'name-to-location' }))?.level ?? 'Learning') !== 'Learning')
-      && !this.selectionHistory.has(learningItemKey({ ...entity, skill })));
+      && !this.selectionHistory.has(learningItemKey({ ...entity, skill }))) : undefined;
     if (revisit && ((counts?.introductions ?? 0) >= 2 || !unseen)) {
       return { ...revisit, skill, kind: 'practice' as const, assisted: false };
     }
