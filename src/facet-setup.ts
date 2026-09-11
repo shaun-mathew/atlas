@@ -1,5 +1,5 @@
 import { countries } from './geography';
-import { continentRegions, defaultFacets, describeFacets, matchesFacets, type FacetSelection } from './facets';
+import { continentRegions, defaultFacets, describeFacets, practiceCandidateCount, type FacetSelection } from './facets';
 import './facet-setup.css';
 
 export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
@@ -20,7 +20,8 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
             <h2 tabindex="-1">What would you like to explore?</h2>
             <p class="facet-description">Start with a kind of place. We’ll narrow it down together.</p>
             <label class="facet-choice"><input type="radio" name="scope" value="countries" checked aria-label="Countries & territories"><span><strong>Countries & territories</strong><small>The ${countries.length} mapped places in Atlas</small></span></label>
-            <p class="facet-note">Cities and water features are outside this learning set.</p>
+            <label class="facet-choice"><input type="radio" name="scope" value="capitals" aria-label="National capitals"><span><strong>National capitals</strong><small>Named capitals and their country relationships</small></span></label>
+            <label class="facet-choice"><input type="radio" name="scope" value="cities" aria-label="Major cities"><span><strong>Major cities</strong><small>A curated worldwide set, including capitals</small></span></label>
           </section>
           <section data-page="2" hidden>
             <h2 tabindex="-1">Where shall we go?</h2>
@@ -34,12 +35,13 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
           </section>
           <section data-page="3" hidden>
             <h2 tabindex="-1">What would you like to learn?</h2>
-            <p class="facet-description">Practice a spatial skill, or slow down with country facts.</p>
+            <p class="facet-description">Each place and skill keeps its own proficiency and reviews.</p>
             <fieldset class="facet-learning"><legend class="facet-note">Available learning options</legend>
-              <label class="facet-choice"><input type="radio" name="learning" value="name-to-location" aria-label="Name-to-location" checked><span><strong>Name-to-location</strong><small>Find a named country on the map or globe.</small></span></label>
+              <label class="facet-choice"><input type="radio" name="learning" value="name-to-location" aria-label="Name-to-location" checked><span><strong>Name-to-location</strong><small>Find a named place on the map or globe.</small></span></label>
               <label class="facet-choice"><input type="radio" name="learning" value="location-to-name-recognition" aria-label="Location-to-name recognition"><span><strong>Location-to-name recognition</strong><small>Name the highlighted country by selecting a search result. This skill has its own reviews.</small></span></label>
               <label class="facet-choice"><input type="radio" name="learning" value="shape-recognition" aria-label="Shape recognition"><span><strong>Shape recognition</strong><small>Identify a country from its outline alone. A separate skill and review schedule.</small></span></label>
               <label class="facet-choice"><input type="radio" name="learning" value="country-facts" aria-label="Country fact cards"><span><strong>Country fact cards</strong><small>Read sourced facts. Reading is not scored and does not reschedule reviews.</small></span></label>
+              <label class="facet-choice"><input type="radio" name="learning" value="capital-to-location" aria-label="Capital relationships"><span><strong>Capital relationships</strong><small>Given a country, locate its capital. Separate from finding a named city.</small></span></label>
             </fieldset>
           </section>
         </div>
@@ -55,7 +57,7 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
         <h2>A little more<br>of <em>the world.</em></h2>
         <p class="facet-plan-selection"></p>
         <p class="facet-plan-count" aria-live="polite"></p>
-        <p class="facet-note">One learning history. Country practice uses the same proficiency and scheduled reviews as recommended practice. Reviews outside your selection stay scheduled.</p>
+        <p class="facet-note">One learning history. Every place and skill keeps separate proficiency and scheduled reviews. Reviews outside your selection stay scheduled.</p>
       </aside>
     </div>`;
   document.body.append(dialog);
@@ -78,7 +80,17 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
       button.setAttribute('aria-current', Number(button.dataset.step) === step ? 'step' : 'false');
     });
     dialog.querySelector('#facet-step-count')!.textContent = `step ${step} of 3`;
-    const coverage = `${countries.filter(country => matchesFacets(country, draft)).length} countries & territories`;
+    const count = practiceCandidateCount(draft);
+    const coverage = `${count} ${draft.scope === 'countries' ? 'countries & territories' : draft.scope === 'capitals' ? 'national capitals' : 'cities'}${count ? '' : ' · choose another region'}`;
+    start.disabled = count === 0;
+    dialog.querySelectorAll<HTMLInputElement>('[name="learning"]').forEach(input => {
+      const allowed = input.value === 'name-to-location'
+        || (draft.scope === 'countries' && input.value !== 'capital-to-location')
+        || (draft.scope === 'capitals' && input.value === 'capital-to-location');
+      input.disabled = !allowed;
+      input.closest<HTMLElement>('label')!.hidden = !allowed;
+      input.checked = input.value === draft.learning;
+    });
     dialog.querySelector('.facet-coverage')!.textContent = coverage;
     dialog.querySelector('.facet-plan-count')!.textContent = coverage;
     dialog.querySelector('.facet-plan-selection')!.textContent = describeFacets(draft);
@@ -91,6 +103,10 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
   }
   dialog.addEventListener('change', event => {
     const input = event.target as HTMLInputElement | HTMLSelectElement;
+    if (input.name === 'scope') {
+      draft.scope = input.value as FacetSelection['scope'];
+      draft.learning = 'name-to-location';
+    }
     if (input.name === 'continent') {
       draft.continent = continent.value as FacetSelection['continent'];
       draft.region = 'All regions';
@@ -104,7 +120,12 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('button');
     if (!button) return;
     if (button.dataset.action === 'cancel') { dialog.close(); return; }
-    if (button.dataset.action === 'start') { onStart({ ...draft }); dialog.close(); return; }
+    if (button.dataset.action === 'start') {
+      if (!practiceCandidateCount(draft)) return;
+      onStart({ ...draft });
+      dialog.close();
+      return;
+    }
     if (button.dataset.step) step = Number(button.dataset.step);
     if (button.dataset.action === 'continue') step++;
     if (button.dataset.action === 'back') step--;
@@ -115,6 +136,7 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
       draft = selection ? { ...selection } : defaultFacets();
       step = 1;
       continent.value = draft.continent;
+      dialog.querySelector<HTMLInputElement>(`[name="scope"][value="${draft.scope}"]`)!.checked = true;
       renderRegions();
       dialog.querySelector<HTMLInputElement>(`[name="learning"][value="${draft.learning}"]`)!.checked = true;
       render();
