@@ -172,3 +172,52 @@ test('answer highlights keep their screen width through flights and button zooms
     expect(Math.min(...frames.map(frame => frame.width)) / settled).toBeGreaterThan(0.9);
   }
 });
+
+test('next item during answer zoom never shrinks land below the returning world scale', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('atlas-practice.guest', JSON.stringify({
+      version: 7, started: true, cursor: 0, attempts: [],
+      current: { countryId: 'MCO', skill: 'name-to-location', kind: 'new', assisted: false },
+    }));
+  });
+  await page.goto('/');
+  await selectWorldPoint(page, -52, -12);
+  const widths = await page.evaluate(async () => {
+    const url = performance.getEntriesByType('resource').map(entry => entry.name).find(name => name.includes('/deps/leaflet.js'))!;
+    // Capture the application's map while the real answer action starts its flight.
+    const L: typeof Leaflet = (await import(/* @vite-ignore */ url)).default;
+    let map: Leaflet.Map | undefined;
+    const flyToBounds = L.Map.prototype.flyToBounds;
+    L.Map.prototype.flyToBounds = function (...args) {
+      map = this;
+      return flyToBounds.apply(this, args);
+    };
+    try {
+      document.querySelector<HTMLButtonElement>('#check')!.click();
+    } finally {
+      L.Map.prototype.flyToBounds = flyToBounds;
+    }
+    if (!map) throw new Error('The incorrect answer did not start a map flight.');
+    const world = map;
+    let country: Leaflet.Polyline | undefined;
+    world.eachLayer(layer => {
+      if (layer instanceof L.Polyline && layer.feature?.properties?.id === 'BRA') country = layer;
+    });
+    const path = country!.getElement() as SVGPathElement;
+    const frame = () => new Promise<void>(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+    // Interrupt at the same visible zoom rather than depending on machine speed.
+    while (world.getZoom() < 3) await frame();
+    const interrupted = path.getBoundingClientRect().width;
+    document.querySelector<HTMLButtonElement>('#next')!.click();
+    const frames = [path.getBoundingClientRect().width];
+    let ended = false;
+    world.once('moveend', () => { ended = true; });
+    while (!ended) {
+      await frame();
+      frames.push(path.getBoundingClientRect().width);
+    }
+    return { interrupted, frames, settled: path.getBoundingClientRect().width };
+  });
+  expect(widths.interrupted / widths.settled).toBeGreaterThan(1.5);
+  expect(Math.min(...widths.frames) / widths.settled).toBeGreaterThan(0.9);
+});

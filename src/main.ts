@@ -283,7 +283,9 @@ function stopWorldMovement() {
   }
   const zoomSnap = map.options.zoomSnap;
   map.options.zoomSnap = 0;
-  map.setView(map.getCenter(), map.getZoom(), { animate: false });
+  // With snapping disabled, stop() also resets the renderer's projection.
+  // setView at the same zoom only pans, leaving flight-scaled paths stale.
+  map.stop();
   map.options.zoomSnap = zoomSnap;
 }
 
