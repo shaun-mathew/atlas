@@ -11,12 +11,17 @@ import { GeographyRenderer } from './geography-renderer';
 import { Globe } from './globe';
 import { createFacetSetup } from './facet-setup';
 import { describeFacets, learningLabels } from './facets';
+import { renderShape } from './shape-presentation';
 
 const app = document.querySelector<HTMLElement>('#app')!;
 app.innerHTML = `
   <div id="map" role="region" aria-label="World map"></div>
   <section id="globe" role="region" aria-label="World globe" hidden>
     <small class="globe-attribution">Natural Earth · Public domain</small>
+  </section>
+  <section id="shape-presentation" aria-label="Shape question" hidden>
+    <div id="shape-geography"></div>
+    <small>Natural Earth · Public domain</small>
   </section>
   <div id="overview-label" class="linked-map-heading" hidden><span>Regional overview</span></div>
   <section id="linked-detail" hidden>
@@ -155,6 +160,7 @@ const feedback = document.querySelector<HTMLDivElement>('#feedback')!;
 const factCard = document.querySelector<HTMLElement>('#country-fact-card')!;
 const check = document.querySelector<HTMLButtonElement>('#check')!;
 const next = document.querySelector<HTMLButtonElement>('#next')!;
+const shapePresentation = document.querySelector<HTMLElement>('#shape-presentation')!;
 const retry = document.querySelector<HTMLButtonElement>('#retry')!;
 const storageNotice = document.querySelector<HTMLParagraphElement>('#storage-notice')!;
 const profile = document.querySelector<HTMLDialogElement>('#profile-dialog')!;
@@ -431,6 +437,10 @@ function renderQuestion(animate = true) {
   const reading = session.readingFacts;
   const recognition = session.recognizingLocation;
   app.classList.toggle('is-recognizing', recognition);
+  const shape = session.started && session.recognizingShape;
+  app.classList.toggle('has-shape', shape);
+  shapePresentation.hidden = !shape;
+  document.querySelector<HTMLElement>('.location-tools')!.hidden = shape;
   app.classList.toggle('is-reading', reading);
   const selectedFacets = session.selection;
   document.querySelector<HTMLElement>('#current-facets')!.hidden = !selectedFacets;
@@ -440,14 +450,14 @@ function renderQuestion(animate = true) {
   document.querySelector<HTMLElement>('#welcome')!.hidden = session.started;
   const country = session.country;
   const answer = session.feedback;
-  if (linkedOpen) globeOpen = false;
+  if (linkedOpen || shape) globeOpen = false;
   app.classList.toggle('has-globe', globeOpen);
   globeContainer.hidden = !globeOpen;
-  map.getContainer().hidden = globeOpen;
+  map.getContainer().hidden = globeOpen || shape;
   presentationButton.dataset.presentation = globeOpen ? 'globe' : 'map';
   presentationButton.setAttribute('aria-label', presentationButton.disabled ? '3D globe unavailable' : globeOpen ? 'Switch to 2D map' : 'Switch to 3D globe');
   globe?.setVisible(globeOpen);
-  const showLinked = session.started && !!country && linkedOpen && !reading;
+  const showLinked = session.started && !!country && linkedOpen && !reading && !shape;
   app.classList.toggle('has-linked-maps', showLinked);
   updateZoomControls();
   document.querySelector<HTMLElement>('#linked-detail')!.hidden = !showLinked;
@@ -455,9 +465,9 @@ function renderQuestion(animate = true) {
   map.getContainer().setAttribute('aria-label', showLinked ? 'Regional overview' : 'World map');
   if (!showLinked) linkedMaps.hide();
   document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
-  document.querySelector('#session > .prompt')!.textContent = recognition ? 'What is' : 'Where is';
+  document.querySelector('#session > .prompt')!.textContent = shape ? 'Which country is' : recognition ? 'What is' : 'Where is';
   countryName.replaceChildren();
-  const heading = recognition && !answer ? 'this country' : country?.properties.name;
+  const heading = shape ? 'this shape' : recognition && !answer ? 'this country' : country?.properties.name;
   for (const word of heading?.split(' ') ?? []) {
     if (countryName.firstChild) countryName.append(' ');
     const part = document.createElement('span');
@@ -492,10 +502,17 @@ function renderQuestion(animate = true) {
   retry.hidden = !answer || answer.correct;
   document.querySelector<HTMLElement>('#retry-note')!.hidden = session.questionKind !== 'retry';
   document.querySelector<HTMLElement>('#practice-note')!.hidden = session.questionKind !== 'practice';
+  document.querySelector('#retry-note')!.textContent = shape
+    ? 'Immediate retry cannot earn retention or postpone a review. Repeated misses bring a recheck forward.'
+    : 'Immediate retry records practice, not retention; your review time stays unchanged.';
+  document.querySelector('#practice-note')!.textContent = shape
+    ? 'Practice revisit cannot earn retention. Repeated misses schedule an earlier recheck.'
+    : 'Practice revisit reinforces this country without changing retention proficiency or its scheduled review.';
   check.hidden = !!answer || reading;
   check.disabled = true;
-  check.firstChild!.textContent = recognition ? 'Check country ' : 'Check location ';
-  recognitionSearch.hidden = !recognition || !!answer;
+  check.firstChild!.textContent = shape ? 'Check answer ' : recognition ? 'Check country ' : 'Check location ';
+  recognitionSearch.hidden = (!recognition && !shape) || !!answer;
+  document.querySelector('#search-instructions')!.textContent = `${shape ? 'Name the shape.' : 'Name the highlighted country.'} Type to filter, then select a result. Use ↑ and ↓ to browse and Enter to select.`;
   selectedCountryId = null;
   countrySearch.value = '';
   closeCountryResults();
@@ -522,12 +539,14 @@ function renderQuestion(animate = true) {
     const result = document.createElement('strong');
     result.textContent = answer.assisted
       ? answer.correct ? 'Correct — guided practice.' : 'Not quite — guided practice.'
-      : answer.correct ? recognition ? 'Correct — country identified.' : 'Correct — well placed.' : 'Not quite — take another look.';
+      : answer.correct ? shape ? 'Correct — recognized.' : recognition ? 'Correct — country identified.' : 'Correct — well placed.' : 'Not quite — take another look.';
     const explanation = document.createElement('span');
-    explanation.textContent = `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${recognition
-      ? `You selected ${answer.selectedCountry}.`
-      : answer.correct ? 'Your selection is within the accepted geographic tolerance.'
-        : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
+    explanation.textContent = shape
+      ? `This is ${country.properties.name}. ${answer.correct ? 'You identified the country.' : `You selected ${answer.selectedCountry}.`}`
+      : `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${recognition
+        ? `You selected ${answer.selectedCountry}.`
+        : answer.correct ? 'Your selection is within the accepted geographic tolerance.'
+          : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
     feedback.replaceChildren(result, explanation);
     // Siachen Glacier is a disputed geographic area without its own country flag.
     if (country.properties.id !== 'KAS') {
@@ -541,6 +560,10 @@ function renderQuestion(animate = true) {
     }
   }
   fitCountryHeading();
+  if (shape && country) {
+    renderShape(document.querySelector<HTMLElement>('#shape-geography')!, country);
+    return;
+  }
   // Finish the panel and surface layout before measuring a destination or
   // starting travel. invalidateSize must not refocus the previous answer.
   if (!showLinked) map.invalidateSize({ pan: false, animate: false });
@@ -568,7 +591,7 @@ function highlightCountry(countryId: string) {
 }
 
 function selectPoint(point: L.LatLng) {
-  if (!session.started || session.readingFacts || session.recognizingLocation || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
+  if (!session.started || session.readingFacts || session.recognizingLocation || session.recognizingShape || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
   pendingPoint = point;
   globe?.setSelection({ longitude: point.lng, latitude: point.lat });
   if (!linkedOpen && !globeOpen) {
@@ -610,7 +633,7 @@ function selectCountryResult(country: Country) {
   selectedCountryId = country.properties.id;
   countrySearch.value = country.properties.name;
   closeCountryResults();
-  searchSummary.textContent = `${country.properties.name} selected. Check country to answer.`;
+  searchSummary.textContent = `${country.properties.name} selected. Ready to check.`;
   check.disabled = false;
 }
 
@@ -646,6 +669,7 @@ countryResults.addEventListener('click', event => {
   const country = searchResults.find(result => result.properties.id === option?.dataset.countryId);
   if (country) selectCountryResult(country);
 });
+
 map.on('click', (event: L.LeafletMouseEvent) => {
   if (linkedOpen) return;
   // Leaflet commits the target projection before its CSS zoom is visible.
@@ -663,7 +687,7 @@ document.querySelector('#start')!.addEventListener('click', () => {
 });
 check.addEventListener('click', () => {
   if (session.feedback) return;
-  if (session.recognizingLocation) {
+  if (session.recognizingLocation || session.recognizingShape) {
     if (!selectedCountryId) return;
     session.answerCountry(selectedCountryId);
   } else {
@@ -671,17 +695,20 @@ check.addEventListener('click', () => {
     session.answer(pendingPoint.lng, pendingPoint.lat);
   }
   renderQuestion();
+  if (session.recognizingShape && session.feedback) next.focus();
 });
 next.addEventListener('click', () => {
   session.next();
   linkedOpen = session.assisted && !session.recognizingLocation;
   renderQuestion();
+  if (session.recognizingShape) countrySearch.focus();
   if (globeOpen && !session.recognizingLocation) globe?.reset();
 });
 retry.addEventListener('click', () => {
   session.retry();
   linkedOpen = session.assisted && !session.recognizingLocation;
   renderQuestion();
+  if (session.recognizingShape) countrySearch.focus();
 });
 document.querySelector('#location-help')!.addEventListener('click', () => {
   session.requestLocationHelp();

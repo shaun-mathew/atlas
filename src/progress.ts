@@ -6,7 +6,7 @@ export const boundaryVersion = 'natural-earth-5.1.2-50m';
 const firstFactVersion = '2026-09-07';
 const countryIdSchema = z.string().min(1).max(128);
 const questionKindSchema = z.enum(['new', 'review', 'practice', 'retry']);
-const spatialSkillSchema = z.enum(['name-to-location', 'location-to-name-recognition']);
+const spatialSkillSchema = z.enum(['name-to-location', 'location-to-name-recognition', 'shape-recognition']);
 const previousKindSchema = questionKindSchema.or(z.literal('diagnostic'))
   .transform(kind => kind === 'diagnostic' ? 'new' as const : kind);
 const questionSchema = z.object({
@@ -24,6 +24,9 @@ const attemptSchema = z.object({
   factVersion: z.string().min(1).max(128).default(firstFactVersion),
   longitude: z.number().min(-180).max(180).optional(),
   latitude: z.number().min(-90).max(90).optional(),
+  // Retain old presentation metadata only on immutable history: it contributes
+  // to migrated IDs and same-ID conflict checks, not current practice behavior.
+  difficultyContext: z.enum(['rich', 'unlabeled-local', 'reduced-context', 'silhouette']).optional(),
   correct: z.boolean(),
   assisted: z.boolean().default(false),
   selectedCountry: z.string().max(256).nullable(),
@@ -105,13 +108,19 @@ function legacyAttemptId(attempt: Omit<Attempt, 'id'>, index: number): string {
 }
 
 function attemptContent(attempt: Omit<Attempt, 'id'>): string {
-  return JSON.stringify([
+  const content: unknown[] = [
     attempt.countryId, attempt.skill, attempt.boundaryVersion, attempt.factVersion,
     attempt.longitude, attempt.latitude, attempt.correct, attempt.assisted,
     attempt.selectedCountry, attempt.answeredAt, attempt.kind,
-    // Keep old migrated IDs stable: extend the hash only for identity answers.
-    ...(attempt.selectedCountryId === undefined ? [] : [attempt.selectedCountryId]),
-  ]);
+  ];
+  // Preserve both migration formats: Shape history reserved a context slot,
+  // while location-recognition appended only the selected entity.
+  if (attempt.difficultyContext !== undefined || attempt.skill === 'shape-recognition') {
+    content.push(attempt.difficultyContext, attempt.selectedCountryId);
+  } else if (attempt.selectedCountryId !== undefined) {
+    content.push(attempt.selectedCountryId);
+  }
+  return JSON.stringify(content);
 }
 
 function unionAttempts(attempts: Attempt[]): Attempt[] {
@@ -131,7 +140,7 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
     const readingCountry = state.readingCountryId === null ? undefined
       : countries.find(country => country.properties.id === state.readingCountryId);
     for (const attempt of state.attempts) {
-      const recognition = attempt.skill === 'location-to-name-recognition';
+      const recognition = attempt.skill === 'location-to-name-recognition' || attempt.skill === 'shape-recognition';
       if (recognition
         ? attempt.selectedCountryId === undefined || attempt.longitude !== undefined || attempt.latitude !== undefined
         : attempt.longitude === undefined || attempt.latitude === undefined) {
@@ -147,7 +156,8 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
       || (answer && (answer.countryId !== state.current?.countryId || answer.kind !== state.current.kind
         // Unsupported historical skills remain durable; session replay skips
         // them and selects a supported prompt rather than discarding the save.
-        || ((answer.skill === 'name-to-location' || answer.skill === 'location-to-name-recognition') && answer.skill !== state.current.skill)))) {
+        || ((answer.skill === 'name-to-location' || answer.skill === 'location-to-name-recognition' || answer.skill === 'shape-recognition')
+          && answer.skill !== state.current.skill)))) {
       context.addIssue({ code: 'custom', message: 'Progress has an inconsistent active question or answer.' });
     }
   }).transform((state, context): Progress => {
@@ -169,8 +179,8 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
     };
   });
 
-// Without question IDs, unfinished prompts for one learning item are conservatively
-// one prompt: help is never forgotten, and retry/practice cannot become retention.
+// Unfinished prompts merge per learning item, never across skills: help is never
+// forgotten, and retry/practice cannot become retention.
 const kindRank: Record<Question['kind'], number> = { retry: 0, practice: 1, new: 2, review: 3 };
 function mergeQuestion(left: Question, right: Question): Question {
   return {

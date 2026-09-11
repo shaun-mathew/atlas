@@ -17,10 +17,10 @@ export const facetSelectionSchema = z.object({
   scope: z.literal('countries'),
   continent: z.enum(Object.keys(continentRegions) as [keyof typeof continentRegions, ...(keyof typeof continentRegions)[]]),
   region: z.string(),
-  learning: z.enum(['name-to-location', 'location-to-name-recognition', 'country-facts']),
+  learning: z.enum(['name-to-location', 'location-to-name-recognition', 'shape-recognition', 'country-facts']),
 }).refine(selection => selection.region === 'All regions' || continentRegions[selection.continent].includes(selection.region));
 export type FacetSelection = z.infer<typeof facetSelectionSchema>;
-export const learningLabels = { 'name-to-location': 'Name-to-location', 'location-to-name-recognition': 'Location-to-name recognition', 'country-facts': 'Country fact cards' };
+export const learningLabels = { 'name-to-location': 'Name-to-location', 'location-to-name-recognition': 'Location-to-name recognition', 'shape-recognition': 'Shape recognition', 'country-facts': 'Country fact cards' };
 export function defaultFacets(): FacetSelection {
   return { scope: 'countries', continent: 'Worldwide', region: 'All regions', learning: 'name-to-location' };
 }

@@ -259,3 +259,22 @@ h1 { margin: 0; font-size: clamp(44px, 4.5vw, 68px); font-weight: 500; line-heig
   .is-recognizing.has-linked-maps #linked-detail { top: 333px; height: 203px; }
   .is-recognizing.has-linked-maps .session-panel { margin-right: 12px; margin-left: 12px; }
 }
+
+/* Shape recognition shows an isolated country, not an interactive world map. */
+.has-shape .map-shade, .has-shape .view-tools, .has-shape .map-zoom, .has-shape #reset-map { display: none; }
+#shape-presentation { position: absolute; top: 160px; bottom: 40px; left: 440px; right: 36px; display: flex; flex-direction: column; min-height: 260px; padding: 20px; border: 1px solid #63777f66; border-radius: 18px; background: #14242e; }
+#shape-geography { flex: 1; min-height: 0; }
+#shape-geography svg { display: block; width: 100%; height: 100%; }
+.shape-target { fill: #d6ed8b; stroke: #eff9ce; stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+#shape-presentation > small { color: var(--muted); font-size: 9px; }
+@media (max-width: 1000px), (max-height: 700px) {
+  #app.has-shape { height: auto; min-height: 100dvh; padding-top: calc(190px + min(42dvh, 400px)); overflow: visible; }
+  #shape-presentation { top: 160px; left: 12px; right: 12px; bottom: auto; height: min(42dvh, 400px); min-height: 240px; padding: 12px; }
+  .has-shape .session-panel { position: relative; top: auto; bottom: auto; left: auto; right: auto; width: auto; max-height: none; margin: 0 12px 16px; padding: 16px; border: 1px solid #63777f66; border-radius: 16px; background: #14242e; }
+  .has-shape .session-panel.is-answered, .has-shape .is-answered #session, .has-shape .is-answered .answer-dock { display: block; overflow: visible; }
+  .has-shape .fact-card { max-height: 260px; }
+  .has-shape .is-answered #next { position: sticky; bottom: 8px; }
+}
+@media (max-height: 570px) {
+  #app.has-shape { padding-top: 420px; }
+}

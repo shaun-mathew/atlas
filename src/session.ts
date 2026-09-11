@@ -22,6 +22,7 @@ export class LearnerSession {
   private learningItems = new Map<string, Proficiency>();
   private selectionHistory = new Map<string, { lastSeenIndex: number; weak: boolean }>();
   private selectionCounts = new Map<string, { attempts: number; introductions: number }>();
+  private shapeMissCounts = new Map<string, number>();
   private readonly storageKey: string | null;
   onchange?: () => void;
   storageNotice = '';
@@ -56,7 +57,7 @@ export class LearnerSession {
 
   private supportsAttempt(attempt: Attempt): boolean {
     return countriesById.has(attempt.countryId)
-      && (attempt.skill === 'name-to-location' || attempt.skill === 'location-to-name-recognition')
+      && (attempt.skill === 'name-to-location' || attempt.skill === 'location-to-name-recognition' || attempt.skill === 'shape-recognition')
       && attempt.boundaryVersion === boundaryVersion && attempt.factVersion === factVersion;
   }
 
@@ -64,6 +65,7 @@ export class LearnerSession {
     this.learningItems.clear();
     this.selectionHistory.clear();
     this.selectionCounts.clear();
+    this.shapeMissCounts.clear();
     for (const attempt of this.attempts) this.recordAttempt(attempt);
     const current = this.state.current;
     const answer = this.attempts[this.cursor];
@@ -83,9 +85,11 @@ export class LearnerSession {
   get recognizingLocation() { return !this.readingFacts && this.state.current?.skill === 'location-to-name-recognition'; }
   get skill() { return this.state.current?.skill ?? 'name-to-location'; }
   private get practiceSkill(): SpatialSkill {
-    return this.selection?.learning === 'location-to-name-recognition' ? 'location-to-name-recognition' : 'name-to-location';
+    const learning = this.selection?.learning;
+    return learning === 'location-to-name-recognition' || learning === 'shape-recognition' ? learning : 'name-to-location';
   }
   get questionKind() { return this.readingFacts ? undefined : this.state.current?.kind; }
+  get recognizingShape() { return !this.readingFacts && this.skill === 'shape-recognition'; }
   get assisted() { return !this.readingFacts && (this.state.current?.assisted ?? false); }
   get country() {
     const id = this.readingFacts ? this.state.readingCountryId : this.state.current?.countryId;
@@ -98,7 +102,7 @@ export class LearnerSession {
   get selection() { return this.state.selection; }
 
   searchCountries(query: string) {
-    if (!this.recognizingLocation) return [];
+    if (!this.recognizingLocation && !this.recognizingShape) return [];
     const text = normalizeCountrySearch(query);
     return countries.filter(country => (!this.selection || matchesFacets(country, this.selection))
       && matchesCountrySearch(country, text));
@@ -124,12 +128,12 @@ export class LearnerSession {
 
   private selectFactCountry(countryId: string): boolean {
     this.state.readingCountryId = countryId;
-    // The reading map reveals location just like linked-map help. Preserve that
-    // exposure on an unanswered prompt without recording an attempt or review.
-    let changed = false;
-    const questions = this.state.current && !this.attempts[this.cursor]
+    // The reading map exposes both outline and location. Preserve that exposure
+    // on every pending skill for the entity without recording an assessment.
+    const pending = this.state.current && !this.attempts[this.cursor]
       ? [this.state.current, ...this.state.pausedQuestions] : this.state.pausedQuestions;
-    for (const question of questions) {
+    let changed = false;
+    for (const question of pending) {
       if (question.countryId !== countryId || question.assisted) continue;
       question.assisted = true;
       changed = true;
@@ -150,6 +154,7 @@ export class LearnerSession {
     this.learningItems.clear();
     this.selectionHistory.clear();
     this.selectionCounts.clear();
+    this.shapeMissCounts.clear();
     this.storageNotice = '';
     this.onchange?.();
     return true;
@@ -163,7 +168,7 @@ export class LearnerSession {
 
 
   requestLocationHelp() {
-    if (!this.started || this.readingFacts || this.recognizingLocation || !this.state.current || this.feedback || this.assisted) return;
+    if (!this.started || this.readingFacts || this.recognizingLocation || this.recognizingShape || !this.state.current || this.feedback || this.assisted) return;
     this.state.current.assisted = true;
     this.save();
   }
@@ -178,11 +183,31 @@ export class LearnerSession {
     this.onchange?.();
   }
 
+  private recordShapeMiss(attempt: Attempt): boolean {
+    if (attempt.skill !== 'shape-recognition') return false;
+    const key = learningItemKey(attempt);
+    const misses = attempt.correct ? 0 : (this.shapeMissCounts.get(key) ?? 0) + 1;
+    const repeatedMiss = misses >= 2;
+    this.shapeMissCounts.set(key, repeatedMiss ? 0 : misses);
+    return repeatedMiss;
+  }
+
   private updateProficiency(attempt: Attempt) {
-    // Immediate retries and extra practice do not measure scheduled retention.
-    if (attempt.kind === 'retry' || attempt.kind === 'practice') return;
+    const repeatedShapeMiss = this.recordShapeMiss(attempt);
     const key = learningItemKey(attempt);
     const previous = this.learningItems.get(key);
+    // Practice never earns retention. Repeated shape misses can bring a check
+    // forward, but a retry cannot postpone one that is already scheduled.
+    if (attempt.kind === 'retry' || attempt.kind === 'practice') {
+      if (repeatedShapeMiss) {
+        const recheckAt = new Date(Date.parse(attempt.answeredAt) + 10 * 60 * 1000).toISOString();
+        this.learningItems.set(key, {
+          level: 'Learning', intervalDays: 0,
+          dueAt: previous && previous.dueAt < recheckAt ? previous.dueAt : recheckAt,
+        });
+      }
+      return;
+    }
     const unassistedSuccess = attempt.correct && !attempt.assisted;
     const intervalDays = unassistedSuccess
       ? attempt.kind === 'review'
@@ -219,7 +244,7 @@ export class LearnerSession {
 
   answer(longitude: number, latitude: number) {
     const country = this.country;
-    if (!this.started || this.readingFacts || this.recognizingLocation || !country || this.feedback || !Number.isFinite(longitude) || !Number.isFinite(latitude)
+    if (!this.started || this.readingFacts || this.recognizingLocation || this.recognizingShape || !country || this.feedback || !Number.isFinite(longitude) || !Number.isFinite(latitude)
       || Math.abs(longitude) > 180 || Math.abs(latitude) > 90) return;
     const point = [longitude, latitude];
     const inside = booleanPointInPolygon(point, country);
@@ -245,12 +270,12 @@ export class LearnerSession {
   answerCountry(countryId: string) {
     const target = this.country;
     const selected = countriesById.get(countryId);
-    if (!this.started || !this.recognizingLocation || !target || this.feedback || !selected
+    if (!this.started || (!this.recognizingLocation && !this.recognizingShape) || !target || this.feedback || !selected
       || (this.selection && !matchesFacets(selected, this.selection))) return;
     this.commitAnswer({
       id: `attempt-${this.attempts.length.toString(36).padStart(10, '0')}-${crypto.randomUUID()}`,
       countryId: target.properties.id,
-      skill: 'location-to-name-recognition',
+      skill: this.skill,
       kind: this.state.current!.kind,
       assisted: this.assisted,
       boundaryVersion, factVersion,
