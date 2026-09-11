@@ -2,13 +2,18 @@ import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 import { pointToPolygonDistance } from '@turf/point-to-polygon-distance';
 import { countries, introductionOrder, matchesCountrySearch, normalizeCountrySearch } from './geography';
 import { factVersion } from './facts';
-import { facetSelectionSchema, matchesFacets, type FacetSelection } from './facets';
+import { facetSelectionSchema, matchesCityFacets, matchesFacets, practiceCandidateCount, type FacetSelection } from './facets';
 import { boundaryVersion, initialProgress, learningItemKey, progressSchema, type Attempt, type Progress, type SpatialSkill } from './progress';
 import { scheduleReview, type Proficiency } from './scheduler';
+import { cities, citiesById, cityContentVersion, cityDistanceKm, cityToleranceKm, type City } from './cities';
 
 const countriesById = new Map(countries.map(country => [country.properties.id, country]));
 const recommendedSkills: readonly SpatialSkill[] = ['name-to-location', 'location-to-name-recognition', 'shape-recognition'];
 type Question = NonNullable<Progress['current']>;
+type LearningEntity = Pick<Question, 'countryId' | 'cityId'>;
+const countryItems: LearningEntity[] = countries.map(country => ({ countryId: country.properties.id }));
+const countryIntroductions: LearningEntity[] = introductionOrder.map(country => ({ countryId: country.properties.id }));
+const cityItems: LearningEntity[] = cities.map(city => ({ countryId: city.countryId, cityId: city.id }));
 
 
 // Attempts are the durable source of skill proficiency and scheduling state.
@@ -52,6 +57,12 @@ export class LearnerSession {
   }
 
   private supportsAttempt(attempt: Attempt): boolean {
+    if (attempt.cityId !== undefined) {
+      const city = citiesById.get(attempt.cityId);
+      return !!city && city.countryId === attempt.countryId
+        && (attempt.skill === 'name-to-location' || (attempt.skill === 'capital-to-location' && city.capital))
+        && attempt.factVersion === cityContentVersion && attempt.toleranceKm === cityToleranceKm;
+    }
     return countriesById.has(attempt.countryId)
       && (attempt.skill === 'name-to-location' || attempt.skill === 'location-to-name-recognition' || attempt.skill === 'shape-recognition')
       && attempt.boundaryVersion === boundaryVersion && attempt.factVersion === factVersion;
@@ -82,7 +93,8 @@ export class LearnerSession {
   get skill() { return this.state.current?.skill ?? 'name-to-location'; }
   private get practiceSkill(): SpatialSkill {
     const learning = this.selection?.learning;
-    return learning === 'location-to-name-recognition' || learning === 'shape-recognition' ? learning : 'name-to-location';
+    return learning === 'location-to-name-recognition' || learning === 'shape-recognition' || learning === 'capital-to-location'
+      ? learning : 'name-to-location';
   }
   get questionKind() { return this.readingFacts ? undefined : this.state.current?.kind; }
   get recognizingShape() { return !this.readingFacts && this.skill === 'shape-recognition'; }
@@ -90,6 +102,10 @@ export class LearnerSession {
   get country() {
     const id = this.readingFacts ? this.state.readingCountryId : this.state.current?.countryId;
     return id ? countriesById.get(id) ?? null : null;
+  }
+  get city(): City | null {
+    const id = this.readingFacts ? undefined : this.state.current?.cityId;
+    return id ? citiesById.get(id) ?? null : null;
   }
   get feedback() { return this.readingFacts ? undefined : this.attempts[this.cursor]; }
   get proficiency() {
@@ -104,22 +120,25 @@ export class LearnerSession {
       && matchesCountrySearch(country, text));
   }
 
-  choosePractice(selection: FacetSelection | null) {
+  choosePractice(selection: FacetSelection | null): boolean {
     const nextSelection = selection === null ? null : facetSelectionSchema.parse(selection);
-    if (this.started && nextSelection?.continent === this.selection?.continent
-      && nextSelection?.region === this.selection?.region && nextSelection?.learning === this.selection?.learning) return;
+    if (practiceCandidateCount(nextSelection) === 0) return false;
+    if (this.started && nextSelection?.scope === this.selection?.scope
+      && nextSelection?.continent === this.selection?.continent
+      && nextSelection?.region === this.selection?.region && nextSelection?.learning === this.selection?.learning) return true;
     this.state.selection = nextSelection;
     if (this.readingFacts) {
       this.selectFactCountry(introductionOrder.find(country => matchesFacets(country, this.selection!))!.properties.id);
     } else {
       // Keep unanswered prompts (including revealed location help) until that
-      // country is selected again. Switching scope must not turn help into recall.
+      // entity is selected again. Switching scope must not turn help into recall.
       if (this.started && this.state.current && !this.attempts[this.cursor]) this.state.pausedQuestions.push(this.state.current);
       this.state.readingCountryId = null;
       this.state.cursor = this.attempts.length;
       this.state.current = this.selectQuestion(new Date().toISOString());
     }
     this.start();
+    return true;
   }
 
   private selectFactCountry(countryId: string): boolean {
@@ -130,7 +149,7 @@ export class LearnerSession {
       ? [this.state.current, ...this.state.pausedQuestions] : this.state.pausedQuestions;
     let changed = false;
     for (const question of pending) {
-      if (question.countryId !== countryId || question.assisted) continue;
+      if (question.cityId !== undefined || question.countryId !== countryId || question.assisted) continue;
       question.assisted = true;
       changed = true;
     }
@@ -166,6 +185,11 @@ export class LearnerSession {
   requestLocationHelp() {
     if (!this.started || this.readingFacts || this.recognizingLocation || this.recognizingShape || !this.state.current || this.feedback || this.assisted) return;
     this.state.current.assisted = true;
+    if (this.state.current.cityId !== undefined) {
+      for (const question of this.state.pausedQuestions) {
+        if (question.cityId === this.state.current.cityId) question.assisted = true;
+      }
+    }
     this.save();
   }
 
@@ -210,8 +234,9 @@ export class LearnerSession {
 
   private recordAttempt(attempt: Attempt) {
     if (!this.supportsAttempt(attempt)) return;
-    let counts = this.selectionCounts.get(attempt.skill);
-    if (!counts) this.selectionCounts.set(attempt.skill, counts = { attempts: 0, introductions: 0 });
+    const group = attempt.cityId === undefined ? attempt.skill : `city:${attempt.skill}`;
+    let counts = this.selectionCounts.get(group);
+    if (!counts) this.selectionCounts.set(group, counts = { attempts: 0, introductions: 0 });
     const index = counts.attempts++;
     this.updateProficiency(attempt);
     const key = learningItemKey(attempt);
@@ -233,6 +258,20 @@ export class LearnerSession {
     const country = this.country;
     if (!this.started || this.readingFacts || this.recognizingLocation || this.recognizingShape || !country || this.feedback || !Number.isFinite(longitude) || !Number.isFinite(latitude)
       || Math.abs(longitude) > 180 || Math.abs(latitude) > 90) return;
+    const city = this.city;
+    if (city) {
+      const distanceKm = cityDistanceKm(longitude, latitude, city);
+      this.commitAnswer({
+        id: `attempt-${this.attempts.length.toString(36).padStart(10, '0')}-${crypto.randomUUID()}`,
+        countryId: city.countryId, cityId: city.id, skill: this.skill,
+        kind: this.state.current!.kind, assisted: this.assisted,
+        boundaryVersion, factVersion: cityContentVersion,
+        longitude, latitude, distanceKm, toleranceKm: cityToleranceKm,
+        correct: distanceKm <= cityToleranceKm,
+        selectedCountry: null, answeredAt: new Date().toISOString(),
+      });
+      return;
+    }
     const point = [longitude, latitude];
     const inside = booleanPointInPolygon(point, country);
     const selected = inside ? country : countries.find(candidate => booleanPointInPolygon(point, candidate));
@@ -292,6 +331,7 @@ export class LearnerSession {
     if (!this.feedback || this.feedback.correct) return;
     this.state.current = {
       countryId: this.feedback.countryId, skill: this.skill, kind: 'retry',
+      ...(this.feedback.cityId === undefined ? {} : { cityId: this.feedback.cityId }),
       assisted: this.feedback.assisted || (this.state.current?.assisted ?? false),
     };
     this.state.cursor = this.attempts.length;
@@ -303,7 +343,14 @@ export class LearnerSession {
       ? this.selectAdaptive(now, this.practiceSkill)!
       : this.selectRecommended(now);
     const index = this.state.pausedQuestions.findIndex(question => learningItemKey(question) === learningItemKey(selected));
-    return index < 0 ? selected : this.state.pausedQuestions.splice(index, 1)[0];
+    const question = index < 0 ? selected : this.state.pausedQuestions.splice(index, 1)[0];
+    // A city location revealed for either skill is still known when switching
+    // between its name and capital relationship, but reveals no country answer.
+    if (question.cityId !== undefined) {
+      question.assisted ||= (this.state.current?.cityId === question.cityId && this.state.current.assisted)
+        || this.state.pausedQuestions.some(pending => pending.cityId === question.cityId && pending.assisted);
+    }
+    return question;
   }
 
   private selectRecommended(now: string): Question {
@@ -336,48 +383,50 @@ export class LearnerSession {
   }
 
   private selectAdaptive(now: string, skill: SpatialSkill, recentCountries?: ReadonlySet<string>): Question | undefined {
-    const counts = this.selectionCounts.get(skill);
-    let dueCountryId: string | undefined;
+    const cityPractice = this.selection !== null && this.selection.scope !== 'countries';
+    const counts = this.selectionCounts.get(cityPractice ? `city:${skill}` : skill);
+    const eligible = (entity: LearningEntity) => !this.selection || (entity.cityId === undefined
+      ? matchesFacets(countriesById.get(entity.countryId)!, this.selection)
+      : matchesCityFacets(citiesById.get(entity.cityId)!, this.selection));
+    const candidates = (cityPractice ? cityItems : countryItems).filter(eligible);
+    let due: LearningEntity | undefined;
     let earliestDueAt: string | undefined;
-    let revisitCountryId: string | undefined;
+    let revisit: LearningEntity | undefined;
     let revisitHistory: { lastSeenIndex: number; weak: boolean } | undefined;
-    let oldestCountryId: string | undefined;
+    let oldest: LearningEntity | undefined;
     let oldestSeenIndex = Infinity;
-    for (const country of countries) {
-      if (this.selection && !matchesFacets(country, this.selection)) continue;
-      if (recentCountries?.has(country.properties.id)) continue;
-      const countryId = country.properties.id;
-      const key = learningItemKey({ countryId, skill });
+    for (const entity of candidates) {
+      if (recentCountries?.has(entity.countryId)) continue;
+      const key = learningItemKey({ ...entity, skill });
       const item = this.learningItems.get(key);
       if (item && item.dueAt <= now && (!earliestDueAt || item.dueAt < earliestDueAt)) {
-        dueCountryId = countryId;
+        due = entity;
         earliestDueAt = item.dueAt;
       }
       const history = this.selectionHistory.get(key);
       if (!history) continue;
       if (history.lastSeenIndex < oldestSeenIndex) {
-        oldestCountryId = countryId;
+        oldest = entity;
         oldestSeenIndex = history.lastSeenIndex;
       }
       if ((counts?.attempts ?? 0) - history.lastSeenIndex > 2
         && (!revisitHistory || (history.weak && !revisitHistory.weak)
           || (history.weak === revisitHistory.weak && history.lastSeenIndex < revisitHistory.lastSeenIndex))) {
-        revisitCountryId = countryId;
+        revisit = entity;
         revisitHistory = history;
       }
     }
-    if (dueCountryId) return { countryId: dueCountryId, skill, kind: 'review' as const, assisted: false };
-    const unseenCountryId = introductionOrder.find(country =>
-      (!this.selection || matchesFacets(country, this.selection))
-        && !recentCountries?.has(country.properties.id)
-        && (this.selection || skill === 'name-to-location'
-          || (this.learningItems.get(learningItemKey({ countryId: country.properties.id, skill: 'name-to-location' }))?.level ?? 'Learning') !== 'Learning')
-        && !this.selectionHistory.has(learningItemKey({ countryId: country.properties.id, skill })))?.properties.id;
-    if (revisitCountryId && ((counts?.introductions ?? 0) >= 2 || !unseenCountryId)) {
-      return { countryId: revisitCountryId, skill, kind: 'practice' as const, assisted: false };
+    if (due) return { ...due, skill, kind: 'review' as const, assisted: false };
+    const unseen = (cityPractice ? candidates : countryIntroductions).find(entity => eligible(entity)
+      && !recentCountries?.has(entity.countryId)
+      && (this.selection || skill === 'name-to-location'
+        || (this.learningItems.get(learningItemKey({ ...entity, skill: 'name-to-location' }))?.level ?? 'Learning') !== 'Learning')
+      && !this.selectionHistory.has(learningItemKey({ ...entity, skill })));
+    if (revisit && ((counts?.introductions ?? 0) >= 2 || !unseen)) {
+      return { ...revisit, skill, kind: 'practice' as const, assisted: false };
     }
-    if (unseenCountryId) return { countryId: unseenCountryId, skill, kind: 'new' as const, assisted: false };
-    return oldestCountryId ? { countryId: oldestCountryId, skill, kind: 'practice', assisted: false } : undefined;
+    if (unseen) return { ...unseen, skill, kind: 'new' as const, assisted: false };
+    return oldest ? { ...oldest, skill, kind: 'practice', assisted: false } : undefined;
   }
 
   next() {

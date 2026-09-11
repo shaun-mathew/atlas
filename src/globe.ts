@@ -1,10 +1,14 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { countries, polygonArea, type Country } from './geography';
+import { CityGlobeSurface } from './city-globe-surface';
 
 type Point = { longitude: number; latitude: number };
 type Answer = Point & { correct: boolean };
+type CityTarget = Point & { toleranceKm: number };
 const radians = Math.PI / 180;
+const earthRadiusKm = 6371.0088;
+const cityMinimumDistance = 1.0008;
 
 function position(point: Point, radius = 1): THREE.Vector3 {
   const latitude = point.latitude * radians;
@@ -33,6 +37,32 @@ export class Globe {
   private readonly surface: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
   private readonly pinTexture: THREE.CanvasTexture;
   private readonly pin: THREE.Sprite;
+  private readonly cityPinTexture: THREE.CanvasTexture;
+  private readonly cityPin: THREE.Sprite;
+  private readonly cityRing = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.ShaderMaterial({
+    depthTest: false,
+    depthWrite: false,
+    transparent: true,
+    vertexShader: `
+      varying vec3 surfacePoint;
+      void main() {
+        surfacePoint = position;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      varying vec3 surfacePoint;
+      void main() {
+        if (dot(normalize(surfacePoint), cameraPosition) <= 1.0) discard;
+        gl_FragColor = vec4(0.84, 0.94, 0.53, 1.0);
+      }
+    `,
+  }));
+  private cityPractice = false;
+  private cityTarget?: CityTarget;
+  private cityAnswer?: Answer;
+  private citySurface?: CityGlobeSurface;
+  private readonly cityImageryNotice = document.createElement('p');
   private hasSelection = false;
   private readonly raycaster = new THREE.Raycaster();
   private readonly observer: ResizeObserver;
@@ -107,11 +137,38 @@ export class Globe {
     this.pin = new THREE.Sprite(new THREE.SpriteMaterial({
       map: this.pinTexture, color: '#d6ef87', depthTest: false, depthWrite: false, toneMapped: false,
     }));
-    this.pin.renderOrder = 1;
-    this.scene.add(this.surface, this.pin);
+    this.pin.renderOrder = 100;
+    const cityMarker = document.createElement('canvas');
+    cityMarker.width = cityMarker.height = 64;
+    const cityContext = cityMarker.getContext('2d')!;
+    cityContext.strokeStyle = '#172d3b';
+    cityContext.lineWidth = 10;
+    cityContext.beginPath();
+    cityContext.arc(32, 32, 19, 0, Math.PI * 2);
+    cityContext.moveTo(32, 3); cityContext.lineTo(32, 22);
+    cityContext.moveTo(32, 42); cityContext.lineTo(32, 61);
+    cityContext.moveTo(3, 32); cityContext.lineTo(22, 32);
+    cityContext.moveTo(42, 32); cityContext.lineTo(61, 32);
+    cityContext.stroke();
+    cityContext.strokeStyle = '#e3f5b1';
+    cityContext.lineWidth = 4;
+    cityContext.stroke();
+    this.cityPinTexture = new THREE.CanvasTexture(cityMarker);
+    this.cityPin = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: this.cityPinTexture, depthTest: false, depthWrite: false, toneMapped: false,
+    }));
+    this.cityPin.renderOrder = 101;
+    this.cityRing.renderOrder = 99;
+    this.cityPin.visible = this.cityRing.visible = false;
+    this.scene.add(this.surface, this.pin, this.cityPin, this.cityRing);
     this.pin.visible = false;
     this.paint(atlas.getContext('2d')!);
     container.prepend(canvas);
+    this.cityImageryNotice.className = 'imagery-notice';
+    this.cityImageryNotice.setAttribute('role', 'status');
+    this.cityImageryNotice.textContent = 'Some globe imagery could not load. Detail may be incomplete. Check your connection or switch to the 2D map.';
+    this.cityImageryNotice.hidden = true;
+    container.append(this.cityImageryNotice);
     this.reducedMotion.addEventListener('change', this.motionPreferenceChanged);
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(container);
@@ -145,6 +202,14 @@ export class Globe {
     canvas.addEventListener('wheel', () => {
       if (this.rotationMotion) this.stopMotion();
     }, { capture: true, passive: true });
+    canvas.addEventListener('wheel', () => {
+      // At city altitudes native deltas can fall below OrbitControls' world
+      // epsilon. Still sample its final input position in the next frame.
+      if (this.cityPractice) {
+        if (this.reducedMotion.matches) this.controlsChanged();
+        else this.requestFrame();
+      }
+    }, { passive: true });
     canvas.addEventListener('pointerup', event => {
       const wasDown = this.pointers.delete(event.pointerId);
       if (!wasDown || moved || this.pointers.size || !this.active || this.disposed) return;
@@ -157,10 +222,12 @@ export class Globe {
     canvas.addEventListener('keydown', event => {
       if (!this.active || this.disposed) return;
       const point = geographic(event.key.startsWith('Arrow') ? this.rotationMotion?.to ?? this.camera.position : this.camera.position);
-      if (event.key === 'ArrowLeft') point.longitude -= 15;
-      else if (event.key === 'ArrowRight') point.longitude += 15;
-      else if (event.key === 'ArrowUp') point.latitude = Math.min(85, point.latitude + 15);
-      else if (event.key === 'ArrowDown') point.latitude = Math.max(-85, point.latitude - 15);
+      const step = this.cityPractice ? Math.min(15, (this.camera.position.length() - 1) * 7.5) : 15;
+      const longitudeStep = this.cityPractice ? step / Math.max(0.05, Math.cos(point.latitude * radians)) : step;
+      if (event.key === 'ArrowLeft') point.longitude -= longitudeStep;
+      else if (event.key === 'ArrowRight') point.longitude += longitudeStep;
+      else if (event.key === 'ArrowUp') point.latitude = Math.min(85, point.latitude + step);
+      else if (event.key === 'ArrowDown') point.latitude = Math.max(-85, point.latitude - step);
       else if (event.key === '+' || event.key === '=') this.zoom(0.8);
       else if (event.key === '-') this.zoom(1.25);
       else if (event.key === 'Enter' || event.key === ' ') onSelect(point);
@@ -175,7 +242,7 @@ export class Globe {
   private createControls() {
     const controls = new OrbitControls(this.orbitCamera, this.renderer.domElement);
     controls.enablePan = false;
-    controls.minDistance = 1.15;
+    controls.minDistance = this.cityPractice ? cityMinimumDistance : 1.15;
     controls.maxDistance = 4;
     // Native damping integrates once per event AND per update, so touch event
     // frequency changes both response and travel. Accumulate native rotation
@@ -209,6 +276,10 @@ export class Globe {
     const elapsed = Math.max(0, (time - this.lastFrameTime) / 1000);
     this.lastFrameTime = time;
     const programmatic = !!this.rotationMotion;
+    if (this.cityPractice && !programmatic) {
+      const inputDistance = this.orbitCamera.position.length();
+      if (Math.abs(inputDistance - this.zoomTarget) > 1e-10) this.easeZoom(inputDistance);
+    }
     this.updatingControls = true;
     if (this.rotationMotion) {
       const motion = this.rotationMotion;
@@ -398,7 +469,9 @@ export class Globe {
     // scale using altitude above the unit sphere, not distance to its centre.
     const distance = this.camera.position.length();
     this.controls.rotateSpeed = (distance - 1) * Math.tan(this.camera.fov * radians / 2) / Math.PI;
+    this.controls.zoomSpeed = this.cityPractice ? (distance - 1) / distance : 1;
     if (!this.active || this.disposed) return;
+    this.citySurface?.update(this.camera, this.renderer.domElement.clientHeight * this.renderer.getPixelRatio());
     // A unit surface point faces this perspective camera iff n·camera > 1.
     // Cull the entire billboard behind the tangent plane so even its halo can
     // never peek through from the far side. Depth testing a tangent billboard
@@ -407,6 +480,11 @@ export class Globe {
     if (this.pin.visible) {
       const depth = distance - this.pin.position.dot(this.camera.position) / distance;
       this.pin.scale.setScalar(28 * depth / (this.renderer.domElement.clientHeight * this.camera.projectionMatrix.elements[5]));
+    }
+    this.cityPin.visible = !!this.cityTarget && this.cityPin.position.dot(this.camera.position) > 1;
+    if (this.cityPin.visible) {
+      const depth = distance - this.cityPin.position.dot(this.camera.position) / distance;
+      this.cityPin.scale.setScalar(44 * depth / (this.renderer.domElement.clientHeight * this.camera.projectionMatrix.elements[5]));
     }
     this.renderer.render(this.scene, this.camera);
   };
@@ -435,6 +513,7 @@ export class Globe {
     }
     this.active = visible;
     this.controls.enabled = visible;
+    this.citySurface?.setActive(visible);
     if (visible) this.resize();
   }
 
@@ -443,6 +522,88 @@ export class Globe {
     if (point) this.pin.position.copy(position(point));
     this.pin.material.color.set(correct ? '#d6ef87' : '#ea947b');
     this.render();
+  }
+
+  setCityPractice(enabled: boolean): void {
+    if (this.disposed || enabled === this.cityPractice) return;
+    this.stopMotion();
+    this.cityPractice = enabled;
+    this.controls.minDistance = enabled ? cityMinimumDistance : 1.15;
+    // Even the closest city camera remains well outside both the unit sphere
+    // and its near plane. Picking continues to intersect the unit sphere.
+    this.camera.near = this.orbitCamera.near = enabled ? 0.00001 : 0.01;
+    this.camera.updateProjectionMatrix();
+    this.orbitCamera.updateProjectionMatrix();
+    if (enabled) {
+      if (this.highlighted) {
+        const previous = this.highlighted;
+        this.highlighted = undefined;
+        this.updateHighlight(previous);
+      }
+      this.citySurface = new CityGlobeSurface(
+        () => this.requestFrame(),
+        this.renderer.capabilities.getMaxAnisotropy(),
+        () => { if (this.cityImageryNotice.hidden) this.cityImageryNotice.hidden = false; },
+      );
+      this.cityImageryNotice.hidden = true;
+      this.scene.add(this.citySurface.group);
+      this.citySurface.setActive(this.active);
+    } else {
+      this.cityImageryNotice.hidden = true;
+      if (this.citySurface) {
+        this.scene.remove(this.citySurface.group);
+        this.citySurface.dispose();
+        this.citySurface = undefined;
+      }
+      this.cityTarget = undefined;
+      this.cityAnswer = undefined;
+      this.cityPin.visible = this.cityRing.visible = false;
+      this.camera.position.setLength(Math.max(this.controls.minDistance, this.camera.position.length()));
+      this.orbitCamera.position.copy(this.camera.position);
+      this.zoomTarget = this.camera.position.length();
+      this.controls.update();
+    }
+    this.setSelection(null);
+  }
+
+  showCityAnswer(target: CityTarget | undefined, answer?: Answer): void {
+    if (this.disposed) return;
+    if (answer && (!this.cityAnswer || answer.longitude !== this.cityAnswer.longitude ||
+      answer.latitude !== this.cityAnswer.latitude || answer.correct !== this.cityAnswer.correct)) {
+      this.stopMotion();
+      this.cityAnswer = { ...answer };
+    } else if (!answer) this.cityAnswer = undefined;
+    if (target && (!this.cityTarget || target.longitude !== this.cityTarget.longitude ||
+      target.latitude !== this.cityTarget.latitude || target.toleranceKm !== this.cityTarget.toleranceKm)) {
+      this.cityTarget = { ...target };
+      const center = position(target);
+      this.cityPin.position.copy(center);
+      const east = new THREE.Vector3(Math.cos(target.longitude * radians), 0, -Math.sin(target.longitude * radians));
+      const north = new THREE.Vector3().crossVectors(center, east);
+      const angle = target.toleranceKm / earthRadiusKm;
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      const positions = new Float32Array(128 * 3);
+      const point = new THREE.Vector3();
+      for (let index = 0; index < 128; index++) {
+        const bearing = index / 128 * Math.PI * 2;
+        point.copy(center).multiplyScalar(cosine)
+          .addScaledVector(east, Math.cos(bearing) * sine)
+          .addScaledVector(north, Math.sin(bearing) * sine);
+        point.toArray(positions, index * 3);
+      }
+      this.cityRing.geometry.dispose();
+      this.cityRing.geometry = new THREE.BufferGeometry();
+      this.cityRing.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      this.cityRing.geometry.computeBoundingSphere();
+      if (!answer?.correct) {
+        const width = Math.min(1, this.camera.aspect);
+        const altitude = Math.max(0.012, angle * 2.2 / (Math.tan(this.camera.fov * radians / 2) * width));
+        this.moveTo(center.multiplyScalar(1 + altitude));
+      }
+    } else if (!target) this.cityTarget = undefined;
+    this.cityRing.visible = !!target;
+    this.setSelection(answer ?? null, answer?.correct);
   }
 
   showAnswer(country?: Country, answer?: Answer) {
@@ -464,7 +625,8 @@ export class Globe {
 
   zoom(factor: number) {
     if (this.disposed) return;
-    this.orbitCamera.position.setLength(THREE.MathUtils.clamp(this.zoomTarget * factor, this.controls.minDistance, this.controls.maxDistance));
+    const distance = this.cityPractice ? 1 + (this.zoomTarget - 1) * factor : this.zoomTarget * factor;
+    this.orbitCamera.position.setLength(THREE.MathUtils.clamp(distance, this.controls.minDistance, this.controls.maxDistance));
     this.controls.update();
     this.controlsChanged();
   }
@@ -486,6 +648,12 @@ export class Globe {
     this.surface.material.dispose();
     this.pinTexture.dispose();
     this.pin.material.dispose();
+    this.citySurface?.dispose();
+    this.cityImageryNotice.remove();
+    this.cityPinTexture.dispose();
+    this.cityPin.material.dispose();
+    this.cityRing.geometry.dispose();
+    this.cityRing.material.dispose();
     this.texture.dispose();
     this.patchTexture.dispose();
     this.renderer.dispose();

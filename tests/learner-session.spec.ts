@@ -431,12 +431,12 @@ test('a guest can revise a pin before checking and cannot count an answer twice'
   await expect(page.getByText('2 answered · 1 correct', { exact: true })).toBeVisible();
 });
 
-test('guest answers and the next learning item survive a browser restart', async () => {
+test('guest answers and the next learning item survive a browser restart', async ({ baseURL }) => {
   const profile = await mkdtemp(join(tmpdir(), 'atlas-guest-'));
   let context = await chromium.launchPersistentContext(profile, { viewport: { width: 1280, height: 900 } });
   try {
     let page = await context.newPage();
-    await page.goto('http://127.0.0.1:5173');
+    await page.goto(baseURL!);
     await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
     await chooseRecallPractice(page);
     await answerWorldPoint(page, -52, -12);
@@ -445,7 +445,7 @@ test('guest answers and the next learning item survive a browser restart', async
     await context.close();
     context = await chromium.launchPersistentContext(profile, { viewport: { width: 1280, height: 900 } });
     page = await context.newPage();
-    await page.goto('http://127.0.0.1:5173');
+    await page.goto(baseURL!);
     await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
     await expect(page.getByRole('status')).toContainText('Correct');
     await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();
@@ -457,7 +457,7 @@ test('guest answers and the next learning item survive a browser restart', async
     await context.close();
     context = await chromium.launchPersistentContext(profile, { viewport: { width: 1280, height: 900 } });
     page = await context.newPage();
-    await page.goto('http://127.0.0.1:5173');
+    await page.goto(baseURL!);
     await page.clock.setFixedTime(new Date('2026-09-07T12:00:00Z'));
     await expect(page.getByRole('heading', { name: /China/ })).toBeVisible();
     await expect(page.getByText('1 answered · 1 correct', { exact: true })).toBeVisible();

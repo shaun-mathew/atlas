@@ -3,6 +3,8 @@ import 'leaflet/dist/leaflet.css';
 import './style.css';
 import { countries, type Country } from './geography';
 import { factVersion, getCountryFacts } from './facts';
+import { cityToleranceKm, getCityFacts } from './cities';
+import { cityImageryUrlTemplate, cityImageryAttribution, cityImageryMinZoom, cityImageryMaxZoom, cityImageryBounds, cityOverviewUrlTemplate, cityOverviewMaxZoom, cityOverviewAttribution } from './city-imagery';
 import { Accounts } from './accounts';
 import { createAccountProfile } from './account-profile';
 import { LinkedMaps } from './linked-maps';
@@ -10,7 +12,7 @@ import { MapPin } from './map-pin';
 import { GeographyRenderer } from './geography-renderer';
 import { Globe } from './globe';
 import { createFacetSetup } from './facet-setup';
-import { describeFacets, learningLabels } from './facets';
+import { defaultFacets, describeFacets, learningLabels, type FacetSelection } from './facets';
 import { renderShape } from './shape-presentation';
 
 const app = document.querySelector<HTMLElement>('#app')!;
@@ -57,6 +59,7 @@ app.innerHTML = `
     <button id="reset-map" class="secondary" type="button" aria-label="World view" title="World view"><svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><circle cx="10" cy="10" r="7" stroke="currentColor"/><ellipse cx="10" cy="10" rx="3" ry="7" stroke="currentColor"/><path d="M3 10h14" stroke="currentColor"/></svg></button>
   <p id="progress" class="progress" aria-label="Practice results"><span class="progress-stat"><span id="answered-count">0</span> answered</span> <span class="progress-divider">·</span> <span class="progress-stat"><span id="correct-count">0</span> correct</span><span id="guided-count" hidden></span></p>
   <div class="session-panel">
+    <button id="change-quiz" class="secondary quiz-trigger" type="button" aria-haspopup="dialog" aria-controls="quiz-chooser" aria-expanded="false"><span><small>Change quiz</small><span id="current-quiz">Countries & territories</span></span><span aria-hidden="true">⌄</span></button>
     <section id="current-facets" class="current-facets" aria-label="Current practice selection" hidden>
       <p id="current-facet-description"></p>
       <button id="edit-facets" class="secondary" type="button">Edit practice set</button>
@@ -75,6 +78,7 @@ app.innerHTML = `
       <p id="current-skill" class="local-note"></p>
       <p class="prompt">Where is</p>
       <h1><span id="country"></span><span class="accent">?</span></h1>
+      <p id="city-instructions" class="city-instructions" hidden></p>
       <div class="location-tools">
         <button id="location-help" class="secondary" type="button">Show location</button>
         <small id="help-warning">Reveals location · guided practice, not retention</small>
@@ -108,6 +112,17 @@ app.innerHTML = `
     </section>
     <p id="storage-notice" role="alert" hidden></p>
   </div>
+  <dialog id="quiz-chooser" class="app-dialog quiz-chooser" aria-labelledby="quiz-chooser-title">
+    <button id="close-quiz-chooser" class="secondary dialog-close" type="button" aria-label="Close quiz chooser">Close</button>
+    <h2 id="quiz-chooser-title">Choose your quiz</h2>
+    <p>One learning history. Each place and skill keeps its own reviews.</p>
+    <div class="quiz-choices">
+      <button type="button" data-scope="countries" data-learning="name-to-location"><strong>Countries & territories</strong><small>Find a country within its boundaries</small></button>
+      <button type="button" data-scope="capitals" data-learning="name-to-location"><strong>National capitals</strong><small>Find a named capital within ${cityToleranceKm} km</small></button>
+      <button type="button" data-scope="cities" data-learning="name-to-location"><strong>Major cities</strong><small>A curated worldwide set, including capitals</small></button>
+      <button type="button" data-scope="capitals" data-learning="capital-to-location"><strong>Capital relationships</strong><small>Given a country, locate its capital</small></button>
+    </div>
+  </dialog>
   <dialog id="profile-dialog" class="app-dialog" aria-labelledby="profile-title">
     <button id="close-profile" class="secondary dialog-close" type="button">Close</button>
     <h2 id="profile-title">Your profile</h2>
@@ -185,7 +200,7 @@ const countryResults = document.querySelector<HTMLElement>('#country-results')!;
 const searchSummary = document.querySelector<HTMLElement>('#search-summary')!;
 let marker: MapPin | undefined;
 let answerPolygon: L.Polygon | undefined;
-let linkedOpen = session.assisted && !session.recognizingLocation;
+let linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
 let globe: Globe | undefined;
 let globeOpen = false;
 const globeContainer = document.querySelector<HTMLElement>('#globe')!;
@@ -317,6 +332,33 @@ map.attributionControl.addAttribution('Natural Earth · Public domain');
 const boundaryStyle: L.PolylineOptions = { smoothFactor: 0, color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1 };
 const boundaries = L.geoJSON(countries, { style: boundaryStyle }).addTo(map);
 const linkedMaps = new LinkedMaps(map, detailMapContainer, selectPoint);
+const cityMarks = L.layerGroup().addTo(map);
+const cityRenderer = L.svg({ padding: 0.5 });
+let cityAnswerBounds: L.LatLngBounds | undefined;
+const cityOverview = L.tileLayer(cityOverviewUrlTemplate, {
+  maxNativeZoom: cityOverviewMaxZoom, maxZoom: cityImageryMaxZoom,
+  attribution: cityOverviewAttribution, zIndex: 0,
+});
+const cityImagery = L.tileLayer(cityImageryUrlTemplate, {
+  minZoom: cityImageryMinZoom, maxNativeZoom: cityImageryMaxZoom, maxZoom: cityImageryMaxZoom,
+  bounds: cityImageryBounds, attribution: cityImageryAttribution,
+});
+const cityScale = L.control.scale({ imperial: false, position: 'bottomleft' });
+const imageryNotice = document.createElement('p');
+imageryNotice.className = 'imagery-notice';
+imageryNotice.setAttribute('role', 'status');
+imageryNotice.hidden = true;
+app.append(imageryNotice);
+for (const layer of [cityOverview, cityImagery]) {
+  layer.on('tileerror', () => {
+    imageryNotice.textContent = 'Some detailed imagery could not load. Check your connection; your answer is kept.';
+    imageryNotice.hidden = !session.city || globeOpen;
+  });
+  layer.on('load', () => {
+    if (!layer.getContainer()?.querySelector('.leaflet-tile-loaded')) return;
+    imageryNotice.hidden = true;
+  });
+}
 
 // Keep the infinite projected grid in Leaflet's pane so pan and zoom move it
 // with the geography, including CSS zooms that do not emit per-frame move events.
@@ -363,40 +405,52 @@ map.on('move zoom resize', drawGrid);
 drawGrid();
 
 function focusAnswer(animate = true) {
-  if (!answerPolygon || linkedOpen || globeOpen || session.feedback?.correct) return;
+  const bounds = cityAnswerBounds ?? answerPolygon?.getBounds();
+  if (!bounds || linkedOpen || globeOpen || session.feedback?.correct) return;
   const canvas = map.getContainer().getBoundingClientRect();
   const overlay = panel.getBoundingClientRect();
   const top = Math.max(header.getBoundingClientRect().bottom, progress.getBoundingClientRect().bottom) - canvas.top + 24;
   stopWorldMovement();
-  map.flyToBounds(answerPolygon.getBounds(), {
+  map.flyToBounds(bounds, {
     paddingTopLeft: [canvas.width <= 700 ? 24 : overlay.right - canvas.left + 32, top],
     paddingBottomRight: [24, canvas.width <= 700 ? canvas.bottom - overlay.top + 24 : 32],
-    maxZoom: 6, animate: animate && !reducedMotion.matches,
+    maxZoom: cityAnswerBounds ? 10 : 6, animate: animate && !reducedMotion.matches,
   });
 }
 map.on('resize', () => focusAnswer(false));
 
 const populationFormatter = new Intl.NumberFormat('en');
 
-function renderFactCard(countryId: string, version: string) {
-  const { facts, sources } = getCountryFacts(countryId, version);
+function renderFactCard(countryId: string, version: string, cityId?: string) {
+  const cityFacts = cityId ? getCityFacts(cityId, version) : undefined;
+  const countryFacts = cityId ? undefined : getCountryFacts(countryId, version);
+  const sources = (cityFacts ?? countryFacts)!.sources;
   const heading = document.createElement('h2');
-  heading.textContent = facts.name;
+  heading.textContent = cityFacts?.city.name ?? countryFacts!.facts.name;
+  factCard.setAttribute('aria-label', cityFacts ? 'City fact card' : 'Country fact card');
   const fields = document.createElement('dl');
-  const population = facts.population;
-  const populationText = population.value === null
-    ? 'Unavailable'
-    : populationFormatter.format(population.value);
-  const referenceYear = population.referenceYear === null
-    ? 'reference year unavailable'
-    : `reference year ${population.referenceYear}`;
-  const entries = [
-    ['Relationship', facts.relationship],
-    ['Languages', facts.languages],
-    ['Population', `${populationText} (${referenceYear})${population.note ? `. ${population.note}` : ''}`],
-    ['Population direction', `${population.direction} · ${population.period}`],
-    ['Highlight', facts.highlight],
-  ];
+  let entries: string[][];
+  if (cityFacts) {
+    const city = cityFacts.city;
+    entries = [
+      ['Relationship', city.relationship],
+      ['Capital role', city.capitalRole ?? 'Not a national capital'],
+      ['Canonical location', `${city.latitude.toFixed(4)}°, ${city.longitude.toFixed(4)}° · a representative city centre, not a municipal boundary`],
+      ['Highlight', city.highlight],
+    ];
+  } else {
+    const facts = countryFacts!.facts;
+    const population = facts.population;
+    const populationText = population.value === null ? 'Unavailable' : populationFormatter.format(population.value);
+    const referenceYear = population.referenceYear === null ? 'reference year unavailable' : `reference year ${population.referenceYear}`;
+    entries = [
+      ['Relationship', facts.relationship],
+      ['Languages', facts.languages],
+      ['Population', `${populationText} (${referenceYear})${population.note ? `. ${population.note}` : ''}`],
+      ['Population direction', `${population.direction} · ${population.period}`],
+      ['Highlight', facts.highlight],
+    ];
+  }
   for (const [label, value] of entries) {
     const term = document.createElement('dt');
     term.textContent = label;
@@ -411,7 +465,7 @@ function renderFactCard(countryId: string, version: string) {
   const summary = document.createElement('summary');
   summary.textContent = 'Sources and fact version';
   const scope = document.createElement('p');
-  scope.textContent = `Geographic scope: ${facts.geographicScope}`;
+  scope.textContent = `Geographic scope: ${cityFacts ? 'Representative urban location; country relationships follow the versioned content policy.' : countryFacts!.facts.geographicScope}`;
   const versionLabel = document.createElement('p');
   versionLabel.className = 'fact-version';
   versionLabel.textContent = `Fact version: ${version}`;
@@ -438,6 +492,28 @@ function renderQuestion(animate = true) {
   stopWorldMovement();
   answerPolygon?.getElement()?.classList.remove('answer-border');
   answerPolygon = undefined;
+  cityMarks.clearLayers();
+  cityAnswerBounds = undefined;
+  const city = session.city;
+  if (city) linkedOpen = false;
+  app.classList.toggle('has-city', !!city);
+  map.setMaxZoom(city ? 14 : 10);
+  if (city && !map.hasLayer(cityImagery)) {
+    cityOverview.addTo(map);
+    cityImagery.addTo(map);
+    cityScale.addTo(map);
+  } else if (!city && map.hasLayer(cityImagery)) {
+    cityOverview.remove();
+    cityImagery.remove();
+    cityScale.remove();
+  }
+  if (!city || globeOpen) imageryNotice.hidden = true;
+  globe?.setCityPractice(!!city);
+  globeContainer.querySelector('.globe-attribution')!.innerHTML = city
+    ? `Natural Earth · ${cityOverviewAttribution} · ${cityImageryAttribution}` : 'Natural Earth · Public domain';
+  const capitalRelationship = session.skill === 'capital-to-location';
+  document.querySelector('#current-quiz')!.textContent = capitalRelationship ? 'Capital relationships'
+    : session.selection?.scope === 'capitals' ? 'National capitals' : city ? 'Major cities' : 'Countries & territories';
   const reading = session.readingFacts;
   const recognition = session.recognizingLocation;
   app.classList.toggle('is-recognizing', recognition);
@@ -447,7 +523,8 @@ function renderQuestion(animate = true) {
   document.querySelector<HTMLElement>('.location-tools')!.hidden = shape;
   app.classList.toggle('is-reading', reading);
   const selectedFacets = session.selection;
-  document.querySelector<HTMLElement>('#current-facets')!.hidden = !selectedFacets;
+  document.querySelector<HTMLElement>('#current-facets')!.hidden = !selectedFacets
+    || (!!city && selectedFacets.continent === 'Worldwide' && selectedFacets.region === 'All regions');
   document.querySelector('#current-facet-description')!.textContent = selectedFacets ? describeFacets(selectedFacets) : '';
   document.querySelector('#current-skill')!.textContent = reading
     ? 'Country fact cards'
@@ -472,15 +549,21 @@ function renderQuestion(animate = true) {
   map.getContainer().setAttribute('aria-label', showLinked ? 'Regional overview' : 'World map');
   if (!showLinked) linkedMaps.hide();
   document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
-  document.querySelector('#session > .prompt')!.textContent = shape ? 'Which country is' : recognition ? 'What is' : 'Where is';
+  document.querySelector('#session > .prompt')!.textContent = capitalRelationship
+    ? `Where is the ${(city?.capitalRole ?? 'capital').replace(/^national capital$/i, 'capital').toLowerCase()} of`
+    : shape ? 'Which country is' : recognition ? 'What is' : 'Where is';
   countryName.replaceChildren();
-  const heading = shape ? 'this shape' : recognition && !answer ? 'this country' : country?.properties.name;
+  const heading = shape ? 'this shape' : recognition && !answer ? 'this country'
+    : city && !capitalRelationship ? city.name : country?.properties.name;
   for (const word of heading?.split(' ') ?? []) {
     if (countryName.firstChild) countryName.append(' ');
     const part = document.createElement('span');
     part.textContent = word;
     countryName.append(part);
   }
+  const cityInstructions = document.querySelector<HTMLElement>('#city-instructions')!;
+  cityInstructions.hidden = !city || !!answer;
+  cityInstructions.textContent = `Place your pin within ${cityToleranceKm} km of the city centre. Zoom in for finer satellite detail.`;
   document.querySelector('#question-kind')!.textContent = reading ? 'Country fact cards' : session.questionKind ? questionLabels[session.questionKind] : '';
   document.querySelector('#question-number')!.textContent = reading ? 'Reading' : `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
   document.querySelector('#answered-count')!.textContent = String(session.attempts.length);
@@ -498,6 +581,7 @@ function renderQuestion(animate = true) {
   storageNotice.textContent = session.storageNotice;
   storageNotice.hidden = !session.storageNotice;
   boundaries.resetStyle();
+  if (city) boundaries.setStyle({ fillOpacity: 0, color: '#ffe7a3', weight: 1.2, opacity: 0.9 });
   marker?.remove();
   marker = undefined;
   pendingPoint = null;
@@ -514,7 +598,7 @@ function renderQuestion(animate = true) {
     : 'Immediate retry records practice, not retention; your review time stays unchanged.';
   document.querySelector('#practice-note')!.textContent = shape
     ? 'Practice revisit cannot earn retention. Repeated misses schedule an earlier recheck.'
-    : 'Practice revisit reinforces this country without changing retention proficiency or its scheduled review.';
+    : `Practice revisit reinforces this ${city ? 'city' : 'country'} without changing retention proficiency or its scheduled review.`;
   check.hidden = !!answer || reading;
   check.disabled = true;
   check.firstChild!.textContent = shape ? 'Check answer ' : recognition ? 'Check country ' : 'Check location ';
@@ -524,7 +608,7 @@ function renderQuestion(animate = true) {
   countrySearch.value = '';
   closeCountryResults();
   searchSummary.textContent = '';
-  const skillLabel = learningLabels[session.skill];
+  const skillLabel = city && !capitalRelationship ? 'City name-to-location' : learningLabels[session.skill];
   proficiency.setAttribute('aria-label', `${skillLabel} proficiency`);
   document.querySelector('#proficiency-skill')!.textContent = skillLabel;
   const itemProficiency = session.proficiency;
@@ -542,13 +626,15 @@ function renderQuestion(animate = true) {
     feedback.textContent = '';
   } else if (country) {
     feedback.className = `feedback ${answer.correct ? 'correct' : 'incorrect'}`;
-    renderFactCard(country.properties.id, answer.factVersion);
+    renderFactCard(country.properties.id, answer.factVersion, city?.id);
     const result = document.createElement('strong');
     result.textContent = answer.assisted
       ? answer.correct ? 'Correct — guided practice.' : 'Not quite — guided practice.'
       : answer.correct ? shape ? 'Correct — recognized.' : recognition ? 'Correct — country identified.' : 'Correct — well placed.' : 'Not quite — take another look.';
     const explanation = document.createElement('span');
-    explanation.textContent = shape
+    explanation.textContent = city
+      ? `${city.name} · ${Math.round(answer.distanceKm!)} km from the city centre. Accepted distance: ${answer.toleranceKm} km. Green dot: centre; ring: accepted area.`
+      : shape
       ? `This is ${country.properties.name}. ${answer.correct ? 'You identified the country.' : `You selected ${answer.selectedCountry}.`}`
       : `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${recognition
         ? `You selected ${answer.selectedCountry}.`
@@ -576,6 +662,26 @@ function renderQuestion(animate = true) {
   if (!showLinked) map.invalidateSize({ pan: false, animate: false });
   const pointAnswer = answer?.longitude !== undefined && answer.latitude !== undefined
     ? { longitude: answer.longitude, latitude: answer.latitude, correct: answer.correct } : undefined;
+  if (city) {
+    globe?.showAnswer();
+    const revealed = !!answer || session.assisted;
+    globe?.showCityAnswer(revealed ? { longitude: city.longitude, latitude: city.latitude, toleranceKm: answer?.toleranceKm ?? cityToleranceKm } : undefined, pointAnswer);
+    if (revealed) {
+      const centre: L.LatLngTuple = [city.latitude, city.longitude];
+      const ring = L.circle(centre, {
+        renderer: cityRenderer, radius: (answer?.toleranceKm ?? cityToleranceKm) * 1000,
+        color: '#d6ef87', weight: 2, fillColor: '#d6ef87', fillOpacity: 0.12, interactive: false,
+      }).addTo(cityMarks);
+      L.circleMarker(centre, {
+        renderer: cityRenderer, radius: 5, color: '#14242e', weight: 2, fillColor: '#d6ef87', fillOpacity: 1, interactive: false,
+      }).addTo(cityMarks);
+      cityAnswerBounds = ring.getBounds();
+      if (pointAnswer) marker = new MapPin(map, [pointAnswer.latitude, pointAnswer.longitude], pointAnswer.correct);
+      if (!globeOpen) focusAnswer(animate);
+    } else resetWorld(animate);
+    return;
+  }
+  globe?.showCityAnswer(undefined);
   globe?.showAnswer(answer || reading || recognition ? country ?? undefined : undefined, pointAnswer);
   if (showLinked && country) {
     linkedMaps.show(country, pointAnswer, { hideTargetName: recognition && !answer, selectable: !recognition });
@@ -706,20 +812,20 @@ check.addEventListener('click', () => {
 });
 next.addEventListener('click', () => {
   session.next();
-  linkedOpen = session.assisted && !session.recognizingLocation;
+  linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
   renderQuestion();
   if (session.recognizingShape) countrySearch.focus();
   if (globeOpen && !session.recognizingLocation) globe?.reset();
 });
 retry.addEventListener('click', () => {
   session.retry();
-  linkedOpen = session.assisted && !session.recognizingLocation;
+  linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
   renderQuestion();
   if (session.recognizingShape) countrySearch.focus();
 });
 document.querySelector('#location-help')!.addEventListener('click', () => {
   session.requestLocationHelp();
-  linkedOpen = true;
+  linkedOpen = !session.city;
   renderQuestion();
 });
 document.querySelector('#close-linked')!.addEventListener('click', () => {
@@ -773,9 +879,56 @@ document.querySelector('#confirm-reset')!.addEventListener('click', async () => 
     confirm.disabled = false;
   }
 });
+const quizChooser = document.querySelector<HTMLDialogElement>('#quiz-chooser')!;
+const quizTrigger = document.querySelector<HTMLButtonElement>('#change-quiz')!;
+function positionQuizChooser() {
+  if (!quizChooser.open) return;
+  const anchor = quizTrigger.getBoundingClientRect();
+  const box = quizChooser.getBoundingClientRect();
+  quizChooser.style.left = `${Math.max(12, Math.min(anchor.left, innerWidth - box.width - 12))}px`;
+  quizChooser.style.top = `${anchor.bottom + box.height + 20 <= innerHeight
+    ? anchor.bottom + 8 : Math.max(12, anchor.top - box.height - 8)}px`;
+}
+quizTrigger.addEventListener('click', () => {
+  const scope = session.selection?.scope ?? 'countries';
+  quizChooser.querySelectorAll<HTMLButtonElement>('[data-scope]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.scope === scope
+      && (button.dataset.learning === 'capital-to-location') === (session.skill === 'capital-to-location')));
+  });
+  quizChooser.showModal();
+  quizTrigger.setAttribute('aria-expanded', 'true');
+  positionQuizChooser();
+});
+document.querySelector('#close-quiz-chooser')!.addEventListener('click', () => quizChooser.close());
+quizChooser.addEventListener('close', () => {
+  quizTrigger.setAttribute('aria-expanded', 'false');
+  quizTrigger.focus({ preventScroll: true });
+});
+quizChooser.addEventListener('click', event => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-scope]');
+  if (button) {
+    const scope = button.dataset.scope as FacetSelection['scope'];
+    const learning = button.dataset.learning as FacetSelection['learning'];
+    quizChooser.close();
+    // Reselecting a quiz keeps custom filters, the active question and its pin.
+    if (scope === (session.selection?.scope ?? 'countries')
+      && (learning === 'capital-to-location') === (session.skill === 'capital-to-location')) return;
+    session.choosePractice(scope === 'countries' ? null : { ...defaultFacets(), scope, learning });
+    linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
+    renderQuestion();
+    if (globeOpen) globe?.reset();
+    return;
+  }
+  const box = quizChooser.getBoundingClientRect();
+  if (event.target === quizChooser && (event.clientX < box.left || event.clientX > box.right
+    || event.clientY < box.top || event.clientY > box.bottom)) quizChooser.close();
+});
+window.addEventListener('resize', positionQuizChooser);
+window.addEventListener('scroll', positionQuizChooser, true);
+
 const facetSetup = createFacetSetup(selection => {
   session.choosePractice(selection);
-  linkedOpen = session.assisted && !session.recognizingLocation;
+  linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
   renderQuestion();
 });
 document.querySelector('#facet-mode')!.addEventListener('click', () => facetSetup.open(session.selection));
@@ -783,14 +936,14 @@ document.querySelector('#edit-facets')!.addEventListener('click', () => facetSet
 document.querySelector('#adaptive-mode')!.addEventListener('click', () => {
   if (!session.selection) return;
   session.choosePractice(null);
-  linkedOpen = session.assisted && !session.recognizingLocation;
+  linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
   renderQuestion();
 });
 const renderAccountProfile = createAccountProfile(accounts);
 accounts.onchange = sessionChanged => {
   if (sessionChanged) {
     session = accounts.session;
-    linkedOpen = session.assisted && !session.recognizingLocation;
+    linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
     renderQuestion();
   }
   renderAccountProfile();
