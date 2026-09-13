@@ -55,7 +55,7 @@ function createAtlasPolygon(polygon: number[][][], width: number, height: number
 function createWaterAtlas(feature: WaterFeature, width: number, height: number): WaterAtlas {
   const geometry = feature.geometry;
   const fill = geometry.type === 'Polygon' || geometry.type === 'MultiPolygon';
-  const drawn = feature.properties.kind !== 'ocean' && feature.properties.kind !== 'lake';
+  const drawn = feature.properties.kind === 'river';
   const polygons = geometry.type === 'Polygon' ? [geometry.coordinates]
     : geometry.type === 'MultiPolygon' ? geometry.coordinates
     : geometry.type === 'LineString' ? [[geometry.coordinates]] : geometry.coordinates.map(line => [line]);
@@ -707,12 +707,10 @@ export class Globe {
     this.waterAtlas.length = 0;
     if (features.length) this.highlighted = undefined;
     const canvas = this.texture.image as HTMLCanvasElement;
-    // Lakes and oceans keep their ordinary basemap appearance. Build framing
-    // from versioned quiz geometry only when revealed, without visible paths.
-    for (const kind of ['sea', 'river'] as const) {
-      for (const feature of features) {
-        if (feature.properties.kind === kind) this.waterAtlas.push(createWaterAtlas(feature, canvas.width, canvas.height));
-      }
+    // Only rivers have overlays. Other water features keep their basemap
+    // appearance and use versioned quiz geometry only for framing when revealed.
+    for (const feature of features) {
+      if (feature.properties.kind === 'river') this.waterAtlas.push(createWaterAtlas(feature, canvas.width, canvas.height));
     }
     this.paint(canvas.getContext('2d')!);
     this.texture.needsUpdate = true;
@@ -724,7 +722,7 @@ export class Globe {
     if (reveal && feature?.properties.id === this.waterTarget?.feature.properties.id) return;
     const target = reveal && feature
       ? this.waterAtlas.find(water => water.feature.properties.id === feature.properties.id)
-        ?? ((feature.properties.kind === 'ocean' || feature.properties.kind === 'lake') &&
+        ?? (feature.properties.kind !== 'river' &&
           this.waterFeatures.some(water => water.properties.id === feature.properties.id)
           ? createWaterAtlas(feature, this.texture.image.width, this.texture.image.height) : undefined)
       : undefined;

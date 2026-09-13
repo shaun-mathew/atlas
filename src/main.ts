@@ -349,10 +349,9 @@ const waterPane = map.createPane('waterFeatures');
 waterPane.style.zIndex = '455';
 waterPane.style.pointerEvents = 'none';
 const waterRenderer = new GeographyRenderer({ pane: 'waterFeatures', padding: 0.5 });
-const waterStyle: L.StyleFunction = feature => ({
-  smoothFactor: 0, color: '#73b9d6', weight: feature?.properties.kind === 'river' ? 2 : 1,
-  fillColor: '#326b87', fillOpacity: 1, renderer: waterRenderer,
-});
+const waterStyle: L.PolylineOptions = {
+  smoothFactor: 0, color: '#73b9d6', weight: 2, renderer: waterRenderer,
+};
 const waterLayers = L.geoJSON(undefined, { style: waterStyle, interactive: false });
 let waterAnswerBounds: L.LatLngBounds | undefined;
 let waterAnswerLayer: L.Polyline<WaterFeature['geometry']> | undefined;
@@ -537,13 +536,11 @@ function renderQuestion(animate = true) {
   cityAnswerBounds = undefined;
   waterAnswerBounds = undefined;
   const water = session.water;
-  const waterHasOverlay = water?.properties.kind === 'river' || water?.properties.kind === 'sea';
+  const waterHasOverlay = water?.properties.kind === 'river';
   if (water && !map.hasLayer(waterLayers)) {
     if (!waterLayers.getLayers().length) {
-      for (const kind of ['sea', 'river'] as const) {
-        for (const feature of waterFeatures) {
-          if (feature.properties.kind === kind) waterLayers.addData(feature);
-        }
+      for (const feature of waterFeatures) {
+        if (feature.properties.kind === 'river') waterLayers.addData(feature);
       }
     }
     waterLayers.addTo(map);
@@ -625,8 +622,8 @@ function renderQuestion(animate = true) {
   cityInstructions.hidden = (!city && !water) || !!answer;
   cityInstructions.textContent = water
     ? !waterHasOverlay
-      ? `Place your pin in the named ${water.properties.kind}. A ${waterToleranceKm} km tolerance applies. Lakes and oceans use the normal water color.`
-      : `Place your pin ${water.properties.kind === 'river' ? 'on the river line' : 'inside the filled water area'}. A ${waterToleranceKm} km tolerance applies. Blue features are shown without labels.`
+      ? `Place your pin in the named ${water.properties.kind}. A ${waterToleranceKm} km tolerance applies. Lakes, seas and oceans use the normal water color.`
+      : `Place your pin on the river line. A ${waterToleranceKm} km tolerance applies. Blue rivers are shown without labels.`
     : `Place your pin within ${cityToleranceKm} km of the city centre. Zoom in for finer satellite detail.`;
   document.querySelector('#question-kind')!.textContent = reading ? 'Country fact cards' : session.questionKind ? questionLabels[session.questionKind] : '';
   document.querySelector('#question-number')!.textContent = reading ? 'Reading' : `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
@@ -749,7 +746,7 @@ function renderQuestion(animate = true) {
         const featureLayer = layer as L.Polyline<WaterFeature['geometry'], WaterFeature['properties']>;
         const feature = featureLayer.feature!;
         if (feature.properties.id !== water.properties.id) return;
-        featureLayer.setStyle({ color: '#d6ef87', weight: water.properties.kind === 'river' ? 4 : 2, fillColor: '#70a99d' });
+        featureLayer.setStyle({ color: '#d6ef87', weight: 4 });
         waterAnswerLayer = featureLayer;
         waterAnswerBounds = featureLayer.getBounds();
       });
