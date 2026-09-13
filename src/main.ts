@@ -212,6 +212,7 @@ const presentationButton = document.querySelector<HTMLButtonElement>('#toggle-pr
 const zoomInButton = document.querySelector<HTMLButtonElement>('#zoom-in')!;
 const zoomOutButton = document.querySelector<HTMLButtonElement>('#zoom-out')!;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let mapMoving = false;
 let worldZoomTarget: number | undefined;
 
 function changePresentation(useGlobe: boolean) {
@@ -283,6 +284,8 @@ map.on('zoomend', () => {
   updateZoomControls();
 });
 map.on('dragstart', () => { worldZoomTarget = undefined; });
+map.on('movestart', () => { mapMoving = true; });
+map.on('moveend', () => { mapMoving = false; });
 for (const event of ['pointerdown', 'wheel', 'keydown']) {
   map.getContainer().addEventListener(event, () => {
     worldZoomTarget = undefined;
@@ -300,11 +303,16 @@ function stopWorldMovement() {
   if (map.getContainer().querySelector('.leaflet-zoom-anim')) {
     (map as L.Map & { _onZoomTransitionEnd(): void })._onZoomTransitionEnd();
   }
+  // Resizing emits moveend even while Leaflet's flight or pan is still active.
+  const motion = map as L.Map & { _flyToFrame?: number; _panAnim?: { _inProgress?: boolean } };
+  if (!mapMoving && motion._flyToFrame === undefined && !motion._panAnim?._inProgress) return;
   const zoomSnap = map.options.zoomSnap;
   map.options.zoomSnap = 0;
   // With snapping disabled, stop() also resets the renderer's projection.
   // setView at the same zoom only pans, leaving flight-scaled paths stale.
   map.stop();
+  // Leaflet cancels this request but retains its ID, including after completion.
+  motion._flyToFrame = undefined;
   map.options.zoomSnap = zoomSnap;
 }
 
@@ -340,6 +348,7 @@ const waterStyle: L.StyleFunction = feature => ({
 });
 const waterLayers = L.geoJSON(undefined, { style: waterStyle, interactive: false });
 let waterAnswerBounds: L.LatLngBounds | undefined;
+let waterAnswerLayer: L.Polyline<WaterFeature['geometry']> | undefined;
 const cityMarks = L.layerGroup().addTo(map);
 const cityRenderer = L.svg({ padding: 0.5 });
 let cityAnswerBounds: L.LatLngBounds | undefined;
@@ -523,7 +532,7 @@ function renderQuestion(animate = true) {
   const water = session.water;
   if (water && !map.hasLayer(waterLayers)) {
     if (!waterLayers.getLayers().length) {
-      for (const kind of ['ocean', 'sea', 'lake', 'river'] as const) {
+      for (const kind of ['sea', 'lake', 'river'] as const) {
         for (const feature of waterFeatures) {
           if (feature.properties.kind === kind) waterLayers.addData(feature);
         }
@@ -531,9 +540,8 @@ function renderQuestion(animate = true) {
     }
     waterLayers.addTo(map);
   } else if (!water) waterLayers.remove();
-  waterLayers.resetStyle();
-  // Restore the base order after a previous answer brought its target forward.
-  waterLayers.eachLayer(layer => (layer as L.Path).bringToFront());
+  if (waterAnswerLayer) waterLayers.resetStyle(waterAnswerLayer);
+  waterAnswerLayer = undefined;
   const city = session.city;
   if (city || water) linkedOpen = false;
   app.classList.toggle('has-city', !!city);
@@ -606,7 +614,9 @@ function renderQuestion(animate = true) {
   const cityInstructions = document.querySelector<HTMLElement>('#city-instructions')!;
   cityInstructions.hidden = (!city && !water) || !!answer;
   cityInstructions.textContent = water
-    ? `Place your pin ${water.properties.kind === 'river' ? 'on the river line' : 'inside the filled water area'}. A ${waterToleranceKm} km tolerance applies. Blue features are shown without labels.`
+    ? water.properties.kind === 'ocean'
+      ? `Place your pin in the named ocean. A ${waterToleranceKm} km tolerance applies. Oceans keep the default map color.`
+      : `Place your pin ${water.properties.kind === 'river' ? 'on the river line' : 'inside the filled water area'}. A ${waterToleranceKm} km tolerance applies. Blue features are shown without labels.`
     : `Place your pin within ${cityToleranceKm} km of the city centre. Zoom in for finer satellite detail.`;
   document.querySelector('#question-kind')!.textContent = reading ? 'Country fact cards' : session.questionKind ? questionLabels[session.questionKind] : '';
   document.querySelector('#question-number')!.textContent = reading ? 'Reading' : `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
@@ -677,7 +687,7 @@ function renderQuestion(animate = true) {
       : answer.correct ? shape ? 'Correct — recognized.' : recognition ? 'Correct — country identified.' : 'Correct — well placed.' : 'Not quite — take another look.';
     const explanation = document.createElement('span');
     explanation.textContent = water
-      ? `${water.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${Math.round(answer.distanceKm!)} km from the mapped ${water.properties.kind === 'river' ? 'river line' : 'water area'}. Accepted distance: ${answer.toleranceKm} km.`
+      ? `${water.properties.name}${water.properties.kind === 'ocean' ? ' keeps the default map color' : ` is highlighted on the ${globeOpen ? 'globe' : 'map'}`}. ${Math.round(answer.distanceKm!)} km from the mapped ${water.properties.kind === 'river' ? 'river line' : 'water area'}. Accepted distance: ${answer.toleranceKm} km.`
       : city
       ? `${city.name} · ${Math.round(answer.distanceKm!)} km from the city centre. Accepted distance: ${answer.toleranceKm} km. Green dot: centre; ring: accepted area.`
       : shape
@@ -713,12 +723,24 @@ function renderQuestion(animate = true) {
     globe?.showAnswer(undefined, pointAnswer);
     globe?.setWaterTarget(water, session.assisted || !!answer);
     if (answer || session.assisted) {
+      if (water.properties.kind === 'ocean') {
+        const polygons = water.geometry.type === 'Polygon' ? [water.geometry.coordinates]
+          : water.geometry.type === 'MultiPolygon' ? water.geometry.coordinates : [];
+        let west = Infinity, east = -Infinity, south = Infinity, north = -Infinity;
+        for (const polygon of polygons) {
+          for (const [longitude, latitude] of polygon[0]) {
+            west = Math.min(west, longitude); east = Math.max(east, longitude);
+            south = Math.min(south, latitude); north = Math.max(north, latitude);
+          }
+        }
+        waterAnswerBounds = L.latLngBounds([south, west], [north, east]);
+      }
       waterLayers.eachLayer(layer => {
         const featureLayer = layer as L.Polyline<WaterFeature['geometry'], WaterFeature['properties']>;
         const feature = featureLayer.feature!;
         if (feature.properties.id !== water.properties.id) return;
         featureLayer.setStyle({ color: '#d6ef87', weight: water.properties.kind === 'river' ? 4 : 2, fillColor: '#70a99d' });
-        featureLayer.bringToFront();
+        waterAnswerLayer = featureLayer;
         waterAnswerBounds = featureLayer.getBounds();
       });
       if (pointAnswer) marker = new MapPin(map, [pointAnswer.latitude, pointAnswer.longitude], pointAnswer.correct);

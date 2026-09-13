@@ -32,6 +32,7 @@ function geographic(point: THREE.Vector3): Point {
 function createWaterAtlas(feature: WaterFeature, width: number, height: number): WaterAtlas {
   const geometry = feature.geometry;
   const fill = geometry.type === 'Polygon' || geometry.type === 'MultiPolygon';
+  const drawn = feature.properties.kind !== 'ocean';
   const polygons = geometry.type === 'Polygon' ? [geometry.coordinates]
     : geometry.type === 'MultiPolygon' ? geometry.coordinates
     : geometry.type === 'LineString' ? [[geometry.coordinates]] : geometry.coordinates.map(line => [line]);
@@ -44,7 +45,7 @@ function createWaterAtlas(feature: WaterFeature, width: number, height: number):
   const pixel = new THREE.Vector2();
   const segment = new THREE.Vector3();
   for (const polygon of polygons) {
-    const part = new Path2D();
+    const part = drawn ? new Path2D() : undefined;
     const extent = new THREE.Box2();
     let exteriorLongitude = 0;
     for (let ringIndex = 0; ringIndex < polygon.length; ringIndex++) {
@@ -55,10 +56,10 @@ function createWaterAtlas(feature: WaterFeature, width: number, height: number):
       // versioned content. Preserve their full extent, especially polar ocean
       // closures; shortest-arc unwrapping would invert broad ocean regions.
       // Rivers may cross the seam and take the short longitudinal interval.
-      const coordinates = ring.map(([rawLongitude, latitude], index) => {
+      const coordinates = fill ? ring : ring.map(([rawLongitude, latitude], index) => {
         if (index) {
           const delta = rawLongitude - ring[index - 1][0];
-          longitude = fill ? rawLongitude : longitude + ((delta + 540) % 360) - 180;
+          longitude += ((delta + 540) % 360) - 180;
         }
         return [longitude, latitude];
       });
@@ -76,18 +77,22 @@ function createWaterAtlas(feature: WaterFeature, width: number, height: number):
       let centerLatitude = 0;
       for (let index = 0; index < coordinates.length; index++) {
         const [longitude, latitude] = coordinates[index];
-        const x = (longitude + shift + 180) * scale;
-        const y = (90 - latitude) * scale;
-        if (index) part.lineTo(x, y);
-        else part.moveTo(x, y);
-        extent.expandByPoint(pixel.set(x, y));
-        vertex.setFromSphericalCoords(1, (90 - latitude) * radians, (longitude + shift) * radians);
-        if (!fill && index) {
-          const weight = previous.angleTo(vertex);
-          segment.copy(previous).add(vertex).normalize();
-          center.addScaledVector(segment, weight);
+        if (part) {
+          const x = (longitude + shift + 180) * scale;
+          const y = (90 - latitude) * scale;
+          if (index) part.lineTo(x, y);
+          else part.moveTo(x, y);
+          extent.expandByPoint(pixel.set(x, y));
         }
-        previous.copy(vertex);
+        if (!fill) {
+          vertex.setFromSphericalCoords(1, (90 - latitude) * radians, (longitude + shift) * radians);
+          if (index) {
+            const weight = previous.angleTo(vertex);
+            segment.copy(previous).add(vertex).normalize();
+            center.addScaledVector(segment, weight);
+          }
+          previous.copy(vertex);
+        }
         if (fill) {
           const next = coordinates[(index + 1) % coordinates.length];
           const cross = (longitude + shift) * next[1] - (next[0] + shift) * latitude;
@@ -97,7 +102,7 @@ function createWaterAtlas(feature: WaterFeature, width: number, height: number):
         }
       }
       if (fill) {
-        part.closePath();
+        part?.closePath();
         if (Math.abs(area) > 1e-12) {
           const latitude = centerLatitude / (3 * area);
           const weight = Math.abs(area) * Math.cos(latitude * radians) * (ringIndex ? -1 : 1);
@@ -105,7 +110,7 @@ function createWaterAtlas(feature: WaterFeature, width: number, height: number):
         }
       }
     }
-    if (extent.isEmpty()) continue;
+    if (!part || extent.isEmpty()) continue;
     // Repeat only the pieces touching the longitude seam. The texture's sphere
     // projection supplies curvature and occlusion, including polygon holes;
     // there are no planar triangles or long 3D chords through the Earth.
@@ -680,9 +685,9 @@ export class Globe {
     this.waterAtlas.length = 0;
     if (features.length) this.highlighted = undefined;
     const canvas = this.texture.image as HTMLCanvasElement;
-    // Put rivers and lakes over broad ocean/sea extents. This immutable atlas
-    // is prepared only when the dataset changes, never on every question.
-    for (const kind of ['ocean', 'sea', 'lake', 'river'] as const) {
+    // Oceans keep the default surface color. Build their camera framing only
+    // when revealed, rather than projecting invisible ocean paths into the atlas.
+    for (const kind of ['sea', 'lake', 'river'] as const) {
       for (const feature of features) {
         if (feature.properties.kind === kind) this.waterAtlas.push(createWaterAtlas(feature, canvas.width, canvas.height));
       }
@@ -694,8 +699,12 @@ export class Globe {
 
   setWaterTarget(feature: WaterFeature | null, reveal: boolean): void {
     if (this.disposed) return;
+    if (reveal && feature?.properties.id === this.waterTarget?.feature.properties.id) return;
     const target = reveal && feature
-      ? this.waterAtlas.find(water => water.feature.properties.id === feature.properties.id) : undefined;
+      ? this.waterAtlas.find(water => water.feature.properties.id === feature.properties.id)
+        ?? (feature.properties.kind === 'ocean' && this.waterFeatures.some(water => water.properties.id === feature.properties.id)
+          ? createWaterAtlas(feature, this.texture.image.width, this.texture.image.height) : undefined)
+      : undefined;
     if (target === this.waterTarget) return;
     const previous = this.waterTarget;
     this.waterTarget = target;
