@@ -1,4 +1,4 @@
-import type { FactSource } from './facts';
+import { FactReleases, type FactRelease } from './fact-releases';
 import data from './data/cities-2026-09-11.json' with { type: 'json' };
 
 export interface City {
@@ -14,11 +14,38 @@ export interface City {
   sourceIds: string[];
 }
 
-// Published releases are immutable: retain this bundle when adding a new version.
-// The bundle records its source dates, role exceptions, curation policy and gaps.
-export const cityContentVersion = '2026-09-11';
-const release = data as { cities: City[]; sources: Record<string, FactSource> };
-export const cities = release.cities;
+// Published bundles stay untouched. Their coordinate/country policies support
+// this provenance; retrieval is explicitly not an effective reference year.
+const original: FactRelease<City> = {
+  version: data.metadata.version,
+  reviewedAt: '2026-09-12',
+  facts: Object.fromEntries(data.cities.map(city => [city.id, city])),
+  sources: data.sources,
+  provenance: Object.fromEntries(data.cities.map(city => [
+    city.id, { referenceYear: null, geographicScope: 'Canonical city point; not a municipal or metropolitan extent.' },
+  ])),
+  changes: [],
+};
+
+export const cityFactReleases = new FactReleases([
+  original,
+  {
+    ...original,
+    version: '2026-09-12',
+    // Clarifies the pinned coordinatePolicy/countryPolicy, without changing
+    // coordinates, names, roles or any assessed geographic relationship.
+    provenance: Object.fromEntries(data.cities.map(city => [
+      city.id,
+      {
+        referenceYear: null,
+        geographicScope: 'Canonical city point; not a municipal or metropolitan extent. Country associations follow the bundled geography policy; inclusion and names do not decide sovereignty.',
+      },
+    ])),
+    changes: [],
+  },
+]);
+export const cityContentVersion = cityFactReleases.currentVersion;
+export const cities = Object.freeze(data.cities.map(city => cityFactReleases.get(city.id, cityContentVersion).facts));
 export const citiesById = new Map(cities.map(city => [city.id, city]));
 
 // A representative city-centre target, not a municipal or metropolitan boundary.
@@ -38,9 +65,7 @@ export function cityDistanceKm(longitude: number, latitude: number, city: City):
   return 2 * earthRadiusKm * Math.asin(Math.sqrt(Math.max(0, Math.min(1, haversine))));
 }
 
-export function getCityFacts(cityId: string, version: string): { city: City; sources: FactSource[] } {
-  if (version !== cityContentVersion) throw new Error(`Unknown city content version: ${version}`);
-  const city = citiesById.get(cityId);
-  if (!city) throw new Error(`Missing city facts: ${cityId}`);
-  return { city, sources: city.sourceIds.map(id => release.sources[id]) };
+export function getCityFacts(cityId: string, version: string) {
+  const { facts: city, ...provenance } = cityFactReleases.get(cityId, version);
+  return { city, ...provenance };
 }

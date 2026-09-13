@@ -1,4 +1,5 @@
 import data from './data/country-facts-2026-09-07.json' with { type: 'json' };
+import { FactReleases, type FactRelease } from './fact-releases';
 
 export interface CountryFacts {
   name: string;
@@ -16,20 +17,44 @@ export interface CountryFacts {
   sourceIds: string[];
 }
 
-export interface FactSource {
-  title: string;
-  url: string;
-  retrievedAt: string;
-  license: string;
-}
+// Original text and source retrieval dates remain pinned. The historical
+// snapshot's explicit provenance is reviewed now, not backdated to retrieval.
+const original: FactRelease<CountryFacts> = {
+  version: '2026-09-07',
+  reviewedAt: '2026-09-12',
+  facts: data.countries as Record<string, CountryFacts>,
+  sources: data.sources,
+  provenance: Object.fromEntries(Object.entries(data.countries).map(([id, facts]) => [
+    id, { referenceYear: facts.population.referenceYear, geographicScope: facts.geographicScope },
+  ])),
+  changes: [],
+};
 
-// Published releases are immutable: retain this bundle when adding a new version.
-export const factVersion = '2026-09-07';
-const release = data as { countries: Record<string, CountryFacts>; sources: Record<string, FactSource> };
+// A scope clarification from the existing AUS card and its Natural Earth
+// source, not a new boundary observation or a material learning-item change.
+const clarifiedFacts: Record<string, CountryFacts> = {
+  ...original.facts,
+  AUS: {
+    ...original.facts.AUS,
+    geographicScope: 'Australian national profile; the map includes the mainland, Tasmania and other islands. Separately mapped Australian external territories have their own cards. This card follows Natural Earth 5.1.2, not a live boundary service.',
+  },
+};
+
+export const countryFactReleases = new FactReleases([
+  original,
+  {
+    ...original,
+    version: '2026-09-12',
+    facts: clarifiedFacts,
+    provenance: {
+      ...original.provenance,
+      AUS: { ...original.provenance.AUS, geographicScope: clarifiedFacts.AUS.geographicScope },
+    },
+    changes: [],
+  },
+]);
+export const factVersion = countryFactReleases.currentVersion;
 
 export function getCountryFacts(countryId: string, version: string) {
-  if (version !== factVersion) throw new Error(`Unknown fact version: ${version}`);
-  const facts = release.countries[countryId];
-  if (!facts) throw new Error(`Missing country facts: ${countryId}`);
-  return { facts, sources: facts.sourceIds.map(id => release.sources[id]) };
+  return countryFactReleases.get(countryId, version);
 }

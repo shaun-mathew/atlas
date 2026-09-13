@@ -1,11 +1,11 @@
 import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 import { pointToPolygonDistance } from '@turf/point-to-polygon-distance';
 import { countries, introductionOrder, matchesCountrySearch, normalizeCountrySearch } from './geography';
-import { factVersion } from './facts';
+import { countryFactReleases } from './facts';
 import { facetSelectionSchema, matchesCityFacets, matchesFacets, practiceCandidateCount, type FacetSelection } from './facets';
 import { boundaryVersion, initialProgress, learningItemKey, progressSchema, type Attempt, type Progress, type SpatialSkill } from './progress';
 import { scheduleReview, type Proficiency } from './scheduler';
-import { cities, citiesById, cityContentVersion, cityDistanceKm, cityToleranceKm, type City } from './cities';
+import { cities, citiesById, cityFactReleases, cityDistanceKm, cityToleranceKm, type City } from './cities';
 import { cityIntroductionOrder, capitalIntroductionOrder } from './city-introductions';
 
 const countriesById = new Map(countries.map(country => [country.properties.id, country]));
@@ -32,7 +32,8 @@ export class LearnerSession {
   onchange?: () => void;
   storageNotice = '';
 
-  constructor(storageKey: string | null = 'atlas-practice.guest', initial?: Progress) {
+  constructor(storageKey: string | null = 'atlas-practice.guest', initial?: Progress,
+    private readonly content = { countries: countryFactReleases, cities: cityFactReleases }) {
     this.storageKey = storageKey;
     if (initial !== undefined) {
       this.replace(initial);
@@ -60,16 +61,48 @@ export class LearnerSession {
     this.save();
   }
 
+  recordFactPresentation(countryId: string, version: string, cityId?: string, attemptId?: string): void {
+    if (!this.started) return;
+    if (cityId === undefined) this.content.countries.get(countryId, version);
+    else if (this.content.cities.get(cityId, version).facts.countryId !== countryId) {
+      throw new Error('Fact presentation must use the city’s versioned country relationship.');
+    }
+    if (attemptId !== undefined) {
+      const attempt = this.attempts.find(attempt => attempt.id === attemptId);
+      if (!attempt || attempt.countryId !== countryId || attempt.cityId !== cityId || attempt.factVersion !== version) {
+        throw new Error('Fact presentation must match the associated attempt.');
+      }
+    }
+    const previous = this.state.factPresentations.at(-1);
+    if (previous?.countryId === countryId && previous.cityId === cityId
+      && previous.factVersion === version && previous.attemptId === attemptId) return;
+    this.state.factPresentations.push(Object.freeze({
+      id: `fact-presentation-${this.state.factPresentations.length.toString(36).padStart(10, '0')}-${crypto.randomUUID()}`,
+      countryId, ...(cityId === undefined ? {} : { cityId }), factVersion: version,
+      presentedAt: new Date().toISOString(), ...(attemptId === undefined ? {} : { attemptId }),
+    }));
+    this.save();
+  }
+
   private supportsAttempt(attempt: Attempt): boolean {
     if (attempt.cityId !== undefined) {
-      const city = citiesById.get(attempt.cityId);
+      const city = this.content.cities.has(attempt.cityId, this.content.cities.currentVersion)
+        ? this.content.cities.get(attempt.cityId, this.content.cities.currentVersion).facts : undefined;
       return !!city && city.countryId === attempt.countryId
         && (attempt.skill === 'name-to-location' || (attempt.skill === 'capital-to-location' && city.capital))
-        && attempt.factVersion === cityContentVersion && attempt.toleranceKm === cityToleranceKm;
+        && this.content.cities.has(city.id, attempt.factVersion) && attempt.toleranceKm === cityToleranceKm;
     }
     return countriesById.has(attempt.countryId)
       && (attempt.skill === 'name-to-location' || attempt.skill === 'location-to-name-recognition' || attempt.skill === 'shape-recognition')
-      && attempt.boundaryVersion === boundaryVersion && attempt.factVersion === factVersion;
+      && attempt.boundaryVersion === boundaryVersion && this.content.countries.has(attempt.countryId, attempt.factVersion);
+  }
+
+  private canPresentAttempt(attempt: Attempt): boolean {
+    return attempt.cityId === undefined
+      ? (attempt.skill === 'name-to-location' || attempt.skill === 'location-to-name-recognition' || attempt.skill === 'shape-recognition')
+        && this.content.countries.has(attempt.countryId, attempt.factVersion)
+      : (attempt.skill === 'name-to-location' || attempt.skill === 'capital-to-location')
+        && this.content.cities.has(attempt.cityId, attempt.factVersion);
   }
 
   private rebuild() {
@@ -80,7 +113,7 @@ export class LearnerSession {
     for (const attempt of this.attempts) this.recordAttempt(attempt);
     const current = this.state.current;
     const answer = this.attempts[this.cursor];
-    if (current && (!countriesById.has(current.countryId) || (answer && !this.supportsAttempt(answer)))) {
+    if (current && (!countriesById.has(current.countryId) || (answer && !this.canPresentAttempt(answer)))) {
       if (!answer) this.state.pausedQuestions.push(current);
       this.state.current = null;
       this.state.cursor = this.attempts.length;
@@ -109,7 +142,9 @@ export class LearnerSession {
   }
   get city(): City | null {
     const id = this.readingFacts ? undefined : this.state.current?.cityId;
-    return id ? citiesById.get(id) ?? null : null;
+    if (!id) return null;
+    const version = this.feedback?.factVersion ?? this.content.cities.currentVersion;
+    return this.content.cities.has(id, version) ? this.content.cities.get(id, version).facts : null;
   }
   get feedback() { return this.readingFacts ? undefined : this.attempts[this.cursor]; }
   get proficiency() {
@@ -233,7 +268,14 @@ export class LearnerSession {
       }
       return;
     }
-    this.learningItems.set(key, scheduleReview(previous, attempt));
+    const item = scheduleReview(previous, attempt);
+    const reviewAfter = attempt.cityId === undefined
+      ? this.content.countries.reviewAfter(attempt.countryId, attempt.skill, attempt.factVersion)
+      : this.content.cities.reviewAfter(attempt.cityId, attempt.skill, attempt.factVersion);
+    // A reviewed material change advances only this item's next check. Keep the
+    // original answer and FSRS history; retries cannot discharge the check.
+    if (reviewAfter && reviewAfter < item.dueAt) item.dueAt = reviewAfter;
+    this.learningItems.set(key, item);
   }
 
   private recordAttempt(attempt: Attempt) {
@@ -269,7 +311,7 @@ export class LearnerSession {
         id: `attempt-${this.attempts.length.toString(36).padStart(10, '0')}-${crypto.randomUUID()}`,
         countryId: city.countryId, cityId: city.id, skill: this.skill,
         kind: this.state.current!.kind, assisted: this.assisted,
-        boundaryVersion, factVersion: cityContentVersion,
+        boundaryVersion, factVersion: this.content.cities.currentVersion,
         longitude, latitude, distanceKm, toleranceKm: cityToleranceKm,
         correct: distanceKm <= cityToleranceKm,
         selectedCountry: null, answeredAt: new Date().toISOString(),
@@ -289,7 +331,7 @@ export class LearnerSession {
       kind: this.state.current!.kind,
       assisted: this.assisted,
       boundaryVersion,
-      factVersion,
+      factVersion: this.content.countries.currentVersion,
       longitude, latitude, correct,
       selectedCountry: selected?.properties.name ?? null,
       answeredAt: new Date().toISOString(),
@@ -308,7 +350,7 @@ export class LearnerSession {
       skill: this.skill,
       kind: this.state.current!.kind,
       assisted: this.assisted,
-      boundaryVersion, factVersion,
+      boundaryVersion, factVersion: this.content.countries.currentVersion,
       correct: selected.properties.id === target.properties.id,
       selectedCountryId: selected.properties.id,
       selectedCountry: selected.properties.name,

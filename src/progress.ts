@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { countries, introductionOrder } from './geography';
 import { facetSelectionSchema, matchesCityFacets, matchesFacets, practiceCandidateCount } from './facets';
-import { citiesById } from './cities';
+import { citiesById, cityFactReleases } from './cities';
 
 export const boundaryVersion = 'natural-earth-5.1.2-50m';
 const firstFactVersion = '2026-09-07';
@@ -39,6 +39,14 @@ const attemptSchema = z.object({
   answeredAt: z.iso.datetime().transform(value => new Date(value).toISOString()),
   kind: questionKindSchema,
 });
+const factPresentationSchema = z.object({
+  id: z.string().min(1).max(256),
+  countryId: countryIdSchema,
+  cityId: countryIdSchema.optional(),
+  factVersion: z.string().min(1).max(128),
+  presentedAt: z.iso.datetime().transform(value => new Date(value).toISOString()),
+  attemptId: z.string().min(1).max(256).optional(),
+}).readonly();
 const normalizedProgressSchema = z.object({
   version: z.literal(7),
   selection: facetSelectionSchema.nullable().default(null),
@@ -48,10 +56,12 @@ const normalizedProgressSchema = z.object({
   cursor: z.number().int().nonnegative(),
   current: questionSchema.nullable(),
   attempts: z.array(attemptSchema),
+  factPresentations: z.array(factPresentationSchema).default([]),
 });
 
 export type Progress = z.infer<typeof normalizedProgressSchema>;
 export type Attempt = Progress['attempts'][number];
+export type FactPresentation = Progress['factPresentations'][number];
 type Question = NonNullable<Progress['current']>;
 export type SpatialSkill = Question['skill'];
 function entityKey(item: { countryId: string; cityId?: string }): string {
@@ -62,15 +72,15 @@ export function learningItemKey(item: { countryId: string; cityId?: string; skil
 }
 
 export class ProgressConflictError extends Error {
-  constructor(id: string) {
-    super(`Attempt ${id} conflicts with saved history.`);
+  constructor(id: string, kind: 'Attempt' | 'Fact presentation' = 'Attempt') {
+    super(`${kind} ${id} conflicts with saved history.`);
     this.name = 'ProgressConflictError';
   }
 }
 
 export function initialProgress(): Progress {
   return {
-    version: 7, selection: null, readingCountryId: null, pausedQuestions: [], started: false, cursor: 0, attempts: [],
+    version: 7, selection: null, readingCountryId: null, pausedQuestions: [], started: false, cursor: 0, attempts: [], factPresentations: [],
     current: { countryId: introductionOrder[0].properties.id, skill: 'name-to-location', kind: 'new', assisted: false },
   };
 }
@@ -88,6 +98,7 @@ const legacyProgressSchema = z.object({
   started: z.boolean(),
   cursor: z.number().int().nonnegative(),
   attempts: z.array(savedAttemptSchema.omit({ kind: true })),
+  factPresentations: z.array(factPresentationSchema).default([]),
 }).refine(state =>
   (state.attempts.length === state.cursor || state.attempts.length === state.cursor + 1)
   && (state.started || (state.cursor === 0 && state.attempts.length === 0))
@@ -149,26 +160,50 @@ function unionAttempts(attempts: Attempt[]): Attempt[] {
     || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
+function factPresentationContent(presentation: FactPresentation): string {
+  return JSON.stringify([
+    presentation.countryId, presentation.cityId, presentation.factVersion,
+    presentation.presentedAt, presentation.attemptId,
+  ]);
+}
+
+function unionFactPresentations(presentations: FactPresentation[]): FactPresentation[] {
+  const byId = new Map<string, FactPresentation>();
+  for (const presentation of presentations) {
+    const previous = byId.get(presentation.id);
+    if (previous && factPresentationContent(previous) !== factPresentationContent(presentation)) {
+      throw new ProgressConflictError(presentation.id, 'Fact presentation');
+    }
+    if (!previous) byId.set(presentation.id, presentation);
+  }
+  return [...byId.values()].sort((a, b) => Date.parse(a.presentedAt) - Date.parse(b.presentedAt)
+    || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
 export const progressSchema = z.union([savedProgressSchema, previousProgressSchema, legacyProgressSchema])
   .superRefine((state, context) => {
     const answer = state.attempts[state.cursor];
     const readingCountry = state.readingCountryId === null ? undefined
       : countries.find(country => country.properties.id === state.readingCountryId);
     const currentCity = state.current?.cityId === undefined ? undefined : citiesById.get(state.current.cityId);
-    if (state.current && state.selection?.learning !== 'country-facts'
+    if (state.current && !answer && state.selection?.learning !== 'country-facts'
       && (state.current.cityId !== undefined || (state.selection !== null && state.selection.scope !== 'countries'))
       && (!currentCity || !state.selection || !matchesCityFacets(currentCity, state.selection)
         || state.current.skill !== state.selection.learning)) {
       context.addIssue({ code: 'custom', message: 'The active city question must match the selected scope and skill.' });
     }
-    for (const item of [...state.pausedQuestions, ...(state.current ? [state.current] : []), ...state.attempts]) {
+    for (const item of [...state.pausedQuestions, ...(state.current && !answer ? [state.current] : []), ...state.attempts]) {
       if (item.cityId === undefined) {
         if (item.skill === 'capital-to-location') {
           context.addIssue({ code: 'custom', message: 'Capital questions require a canonical city.' });
         }
         continue;
       }
-      const city = citiesById.get(item.cityId);
+      // Answered history belongs to its release, not today's catalogue or roles.
+      // Unavailable releases stay durable but cannot supply current assessment.
+      if ('factVersion' in item && !cityFactReleases.has(item.cityId, item.factVersion)) continue;
+      const city = 'factVersion' in item
+        ? cityFactReleases.get(item.cityId, item.factVersion).facts : citiesById.get(item.cityId);
       if (!city || city.countryId !== item.countryId
         || (item.skill !== 'name-to-location' && item.skill !== 'capital-to-location')
         || (item.skill === 'capital-to-location' && !city.capital)) {
@@ -194,7 +229,7 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
       || (!state.started && (state.cursor !== 0 || state.attempts.length !== 0))
       || new Set(state.pausedQuestions.map(learningItemKey)).size !== state.pausedQuestions.length
       || state.pausedQuestions.some(question => state.current && learningItemKey(question) === learningItemKey(state.current))
-      || (state.selection !== null && practiceCandidateCount(state.selection) === 0)
+      || (!answer && state.selection !== null && practiceCandidateCount(state.selection) === 0)
       || (state.selection?.learning === 'country-facts'
         && (!readingCountry || !matchesFacets(readingCountry, state.selection)))
       || (answer && (answer.countryId !== state.current?.countryId || answer.cityId !== state.current?.cityId || answer.kind !== state.current.kind
@@ -210,15 +245,17 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
     }));
     const answerId = withIds[state.cursor]?.id;
     let attempts: Attempt[];
+    let factPresentations: FactPresentation[];
     try {
       attempts = unionAttempts(withIds);
+      factPresentations = unionFactPresentations(state.factPresentations);
     } catch (error) {
       if (!(error instanceof ProgressConflictError)) throw error;
       context.addIssue({ code: 'custom', message: error.message });
       return z.NEVER;
     }
     return {
-      ...state, attempts,
+      ...state, attempts, factPresentations,
       cursor: answerId === undefined ? attempts.length : attempts.findIndex(attempt => attempt.id === answerId),
     };
   });
@@ -240,6 +277,7 @@ export function mergeProgress(account: Progress, incoming: Progress): Progress {
   const saved = progressSchema.parse(account);
   const received = progressSchema.parse(incoming);
   const attempts = unionAttempts([...saved.attempts, ...received.attempts]);
+  const factPresentations = unionFactPresentations([...saved.factPresentations, ...received.factPresentations]);
   // Attaching an untouched guest must not replace an account's learning screen.
   const active = received.started || !saved.started ? received : saved;
   const answerId = active.attempts[active.cursor]?.id;
@@ -268,7 +306,7 @@ export function mergeProgress(account: Progress, incoming: Progress): Progress {
     ...question, assisted: question.assisted || exposed.has(entityKey(question)),
   })).sort((a, b) => learningItemKey(a).localeCompare(learningItemKey(b)));
   return {
-    ...active, started: saved.started || received.started, current, pausedQuestions, attempts,
+    ...active, started: saved.started || received.started, current, pausedQuestions, attempts, factPresentations,
     cursor: answerId === undefined ? attempts.length : attempts.findIndex(attempt => attempt.id === answerId),
   };
 }

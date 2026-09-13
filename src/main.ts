@@ -421,10 +421,10 @@ map.on('resize', () => focusAnswer(false));
 
 const populationFormatter = new Intl.NumberFormat('en');
 
-function renderFactCard(countryId: string, version: string, cityId?: string) {
+function renderFactCard(countryId: string, version: string, cityId?: string, attemptId?: string) {
   const cityFacts = cityId ? getCityFacts(cityId, version) : undefined;
   const countryFacts = cityId ? undefined : getCountryFacts(countryId, version);
-  const sources = (cityFacts ?? countryFacts)!.sources;
+  const release = (cityFacts ?? countryFacts)!;
   const heading = document.createElement('h2');
   heading.textContent = cityFacts?.city.name ?? countryFacts!.facts.name;
   factCard.setAttribute('aria-label', cityFacts ? 'City fact card' : 'Country fact card');
@@ -435,7 +435,7 @@ function renderFactCard(countryId: string, version: string, cityId?: string) {
     entries = [
       ['Relationship', city.relationship],
       ['Capital role', city.capitalRole ?? 'Not a national capital'],
-      ['Canonical location', `${city.latitude.toFixed(4)}°, ${city.longitude.toFixed(4)}° · a representative city centre, not a municipal boundary`],
+      ['Canonical location', `${city.latitude.toFixed(4)}°, ${city.longitude.toFixed(4)}°`],
       ['Highlight', city.highlight],
     ];
   } else {
@@ -465,12 +465,19 @@ function renderFactCard(countryId: string, version: string, cityId?: string) {
   const summary = document.createElement('summary');
   summary.textContent = 'Sources and fact version';
   const scope = document.createElement('p');
-  scope.textContent = `Geographic scope: ${cityFacts ? 'Representative urban location; country relationships follow the versioned content policy.' : countryFacts!.facts.geographicScope}`;
+  scope.textContent = `Geographic scope: ${release.geographicScope}`;
+  const referenceYear = document.createElement('p');
+  referenceYear.textContent = `${cityFacts ? 'Reference year' : 'Population reference year'}: ${release.referenceYear ?? 'Unavailable; the sources do not state a reference year.'}`;
+  const reviewed = document.createElement('p');
+  const reviewDate = document.createElement('time');
+  reviewDate.dateTime = release.reviewedAt;
+  reviewDate.textContent = release.reviewedAt;
+  reviewed.append('Reviewed ', reviewDate);
   const versionLabel = document.createElement('p');
   versionLabel.className = 'fact-version';
   versionLabel.textContent = `Fact version: ${version}`;
   const sourceList = document.createElement('ul');
-  for (const source of sources) {
+  for (const source of release.sources) {
     const item = document.createElement('li');
     const link = document.createElement('a');
     link.href = source.url;
@@ -482,10 +489,11 @@ function renderFactCard(countryId: string, version: string, cityId?: string) {
     item.append(link, retrieved);
     sourceList.append(item);
   }
-  details.append(summary, scope, sourceList);
+  details.append(summary, scope, referenceYear, reviewed, sourceList);
   factCard.replaceChildren(heading, informational, fields, versionLabel, details);
   factCard.hidden = false;
   factCard.scrollTop = 0;
+  session.recordFactPresentation(countryId, version, cityId, attemptId);
 }
 
 function renderQuestion(animate = true) {
@@ -626,7 +634,7 @@ function renderQuestion(animate = true) {
     feedback.textContent = '';
   } else if (country) {
     feedback.className = `feedback ${answer.correct ? 'correct' : 'incorrect'}`;
-    renderFactCard(country.properties.id, answer.factVersion, city?.id);
+    renderFactCard(country.properties.id, answer.factVersion, city?.id, answer.id);
     const result = document.createElement('strong');
     result.textContent = answer.assisted
       ? answer.correct ? 'Correct — guided practice.' : 'Not quite — guided practice.'
