@@ -11,6 +11,7 @@ import { createAccountProfile } from './account-profile';
 import { LinkedMaps } from './linked-maps';
 import { MapPin } from './map-pin';
 import { GeographyRenderer } from './geography-renderer';
+import { addInlandWater } from './inland-water';
 import { Globe } from './globe';
 import { createFacetSetup } from './facet-setup';
 import { defaultFacets, describeFacets, learningLabels, type FacetSelection } from './facets';
@@ -341,10 +342,16 @@ map.attributionControl.addAttribution('Natural Earth · Public domain');
 // Keep the same coastline through CSS zooms and the final reprojection.
 const boundaryStyle: L.PolylineOptions = { smoothFactor: 0, color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1 };
 const boundaries = L.geoJSON(countries, { style: boundaryStyle }).addTo(map);
+const inlandWater = addInlandWater(map);
 const linkedMaps = new LinkedMaps(map, detailMapContainer, selectPoint);
+// Quiz rivers remain visible across ordinary lakes, below the linked viewport.
+const waterPane = map.createPane('waterFeatures');
+waterPane.style.zIndex = '455';
+waterPane.style.pointerEvents = 'none';
+const waterRenderer = new GeographyRenderer({ pane: 'waterFeatures', padding: 0.5 });
 const waterStyle: L.StyleFunction = feature => ({
   smoothFactor: 0, color: '#73b9d6', weight: feature?.properties.kind === 'river' ? 2 : 1,
-  fillColor: '#326b87', fillOpacity: 1,
+  fillColor: '#326b87', fillOpacity: 1, renderer: waterRenderer,
 });
 const waterLayers = L.geoJSON(undefined, { style: waterStyle, interactive: false });
 let waterAnswerBounds: L.LatLngBounds | undefined;
@@ -530,9 +537,10 @@ function renderQuestion(animate = true) {
   cityAnswerBounds = undefined;
   waterAnswerBounds = undefined;
   const water = session.water;
+  const waterHasOverlay = water?.properties.kind === 'river' || water?.properties.kind === 'sea';
   if (water && !map.hasLayer(waterLayers)) {
     if (!waterLayers.getLayers().length) {
-      for (const kind of ['sea', 'lake', 'river'] as const) {
+      for (const kind of ['sea', 'river'] as const) {
         for (const feature of waterFeatures) {
           if (feature.properties.kind === kind) waterLayers.addData(feature);
         }
@@ -543,6 +551,8 @@ function renderQuestion(animate = true) {
   if (waterAnswerLayer) waterLayers.resetStyle(waterAnswerLayer);
   waterAnswerLayer = undefined;
   const city = session.city;
+  if (city) inlandWater.remove();
+  else if (!map.hasLayer(inlandWater)) inlandWater.addTo(map);
   if (city || water) linkedOpen = false;
   app.classList.toggle('has-city', !!city);
   map.setMaxZoom(city ? 14 : 10);
@@ -614,8 +624,8 @@ function renderQuestion(animate = true) {
   const cityInstructions = document.querySelector<HTMLElement>('#city-instructions')!;
   cityInstructions.hidden = (!city && !water) || !!answer;
   cityInstructions.textContent = water
-    ? water.properties.kind === 'ocean'
-      ? `Place your pin in the named ocean. A ${waterToleranceKm} km tolerance applies. Oceans keep the default map color.`
+    ? !waterHasOverlay
+      ? `Place your pin in the named ${water.properties.kind}. A ${waterToleranceKm} km tolerance applies. Lakes and oceans use the normal water color.`
       : `Place your pin ${water.properties.kind === 'river' ? 'on the river line' : 'inside the filled water area'}. A ${waterToleranceKm} km tolerance applies. Blue features are shown without labels.`
     : `Place your pin within ${cityToleranceKm} km of the city centre. Zoom in for finer satellite detail.`;
   document.querySelector('#question-kind')!.textContent = reading ? 'Country fact cards' : session.questionKind ? questionLabels[session.questionKind] : '';
@@ -687,7 +697,7 @@ function renderQuestion(animate = true) {
       : answer.correct ? shape ? 'Correct — recognized.' : recognition ? 'Correct — country identified.' : 'Correct — well placed.' : 'Not quite — take another look.';
     const explanation = document.createElement('span');
     explanation.textContent = water
-      ? `${water.properties.name}${water.properties.kind === 'ocean' ? ' keeps the default map color' : ` is highlighted on the ${globeOpen ? 'globe' : 'map'}`}. ${Math.round(answer.distanceKm!)} km from the mapped ${water.properties.kind === 'river' ? 'river line' : 'water area'}. Accepted distance: ${answer.toleranceKm} km.`
+      ? `${water.properties.name}${waterHasOverlay ? ` is highlighted on the ${globeOpen ? 'globe' : 'map'}` : ' uses the normal water color'}. ${Math.round(answer.distanceKm!)} km from the mapped ${water.properties.kind === 'river' ? 'river line' : 'water area'}. Accepted distance: ${answer.toleranceKm} km.`
       : city
       ? `${city.name} · ${Math.round(answer.distanceKm!)} km from the city centre. Accepted distance: ${answer.toleranceKm} km. Green dot: centre; ring: accepted area.`
       : shape
@@ -723,7 +733,7 @@ function renderQuestion(animate = true) {
     globe?.showAnswer(undefined, pointAnswer);
     globe?.setWaterTarget(water, session.assisted || !!answer);
     if (answer || session.assisted) {
-      if (water.properties.kind === 'ocean') {
+      if (!waterHasOverlay) {
         const polygons = water.geometry.type === 'Polygon' ? [water.geometry.coordinates]
           : water.geometry.type === 'MultiPolygon' ? water.geometry.coordinates : [];
         let west = Infinity, east = -Infinity, south = Infinity, north = -Infinity;

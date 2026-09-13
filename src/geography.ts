@@ -1,5 +1,6 @@
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from 'geojson';
 import data from './data/countries.json' with { type: 'json' };
+import inlandWaterData from './data/inland-water.json' with { type: 'json' };
 
 export type Country = Feature<Polygon | MultiPolygon, { id: string; name: string; region: string }>;
 
@@ -9,6 +10,12 @@ export type Country = Feature<Polygon | MultiPolygon, { id: string; name: string
 // Policy: all 241 mapped countries and territories except Antarctica, using
 // Natural Earth's de facto boundaries. Names and inclusion do not imply recognition.
 export const countries = (data as FeatureCollection<Polygon | MultiPolygon, Country['properties']>).features;
+
+// Natural Earth v5.1.2, 1:50m lakes and reservoirs; public domain.
+// Source: https://github.com/nvkelso/natural-earth-vector/blob/v5.1.2/geojson/ne_50m_lakes.geojson
+// Retrieved 2026-09-13. Geometry is unchanged; only name properties are retained.
+// Basemap context only: these shapes never replace versioned assessment geometry.
+export const inlandWaters = (inlandWaterData as FeatureCollection<Polygon | MultiPolygon, { name: string }>).features;
 
 // Search aliases are explicit content, not a spelling or fuzzy-grading rule.
 // The selected entity ID remains the answer regardless of the search term.

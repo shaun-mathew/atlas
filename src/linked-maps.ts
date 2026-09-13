@@ -3,6 +3,7 @@ import type { Polygon } from 'geojson';
 import { countries, polygonArea, type Country } from './geography';
 import { MapPin, type MapProjection } from './map-pin';
 import { GeographyRenderer } from './geography-renderer';
+import { addInlandWater } from './inland-water';
 
 type Answer = { longitude: number; latitude: number; correct: boolean };
 type LandMass = { country: Country; geometry: Polygon; bounds: L.LatLngBounds; area: number; anchor?: L.LatLng };
@@ -126,6 +127,7 @@ function frameFor(country: Country): Frame {
 
 export class LinkedMaps {
   private detail?: L.Map;
+  private detailWater?: L.GeoJSON;
   private country?: Country;
   private frame?: Frame;
   private active = false;
@@ -151,6 +153,7 @@ export class LinkedMaps {
   private detailLabels: Labels = new Map();
   private overviewCopies: Copies = new Map();
   private detailCopies: Copies = new Map();
+  private waterCopies = new Map<L.Map, Map<number, L.GeoJSON>>();
   private overviewScale = L.control.scale({ imperial: false, position: 'bottomleft' });
   private observer: ResizeObserver;
 
@@ -223,6 +226,8 @@ export class LinkedMaps {
         }, { passive: true });
       }
     }
+    if (this.detailWater) this.detailWater.addTo(this.detail);
+    else this.detailWater = addInlandWater(this.detail);
     if (changed || !this.overviewTarget) {
       this.overviewTarget?.remove();
       this.detailTarget?.remove();
@@ -262,6 +267,9 @@ export class LinkedMaps {
     this.clearLabels(this.detailLabels);
     this.clearCopies(this.overviewCopies);
     this.clearCopies(this.detailCopies);
+    this.detailWater?.remove();
+    for (const shifts of this.waterCopies.values()) for (const layer of shifts.values()) layer.remove();
+    this.waterCopies.clear();
     this.overviewScale.remove();
     this.overview.options.zoomSnap = this.originalZoomSnap;
   }
@@ -412,7 +420,10 @@ export class LinkedMaps {
       path.setAttribute('d', 'M0 0H100V100H0Z');
       path.setAttribute('class', 'linked-viewport');
       svg.append(path);
-      this.viewport = L.svgOverlay(svg, bounds, { interactive: false }).addTo(this.overview);
+      const pane = this.overview.getPane('linkedViewport') ?? this.overview.createPane('linkedViewport');
+      pane.style.zIndex = '460';
+      pane.style.pointerEvents = 'none';
+      this.viewport = L.svgOverlay(svg, bounds, { pane: 'linkedViewport', interactive: false }).addTo(this.overview);
     }
     this.viewport.bringToFront();
   };
@@ -482,6 +493,20 @@ export class LinkedMaps {
         if (!shifts) copies.set(part, shifts = new Map());
         shifts.set(shift, layer);
       }
+    }
+    // Match the retained country coverage, without keeping old worlds as we pan.
+    const needed = new Set<number>();
+    for (const shifts of copies.values()) for (const shift of shifts.keys()) needed.add(shift);
+    let water = this.waterCopies.get(map);
+    if (!water) this.waterCopies.set(map, water = new Map());
+    for (const [shift, layer] of water) {
+      if (!needed.has(shift)) {
+        layer.remove();
+        water.delete(shift);
+      }
+    }
+    for (const shift of needed) {
+      if (!water.has(shift)) water.set(shift, addInlandWater(map, shift));
     }
   }
 

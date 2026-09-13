@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { countries, polygonArea, type Country } from './geography';
+import { countries, inlandWaters, polygonArea, type Country } from './geography';
 import { CityGlobeSurface } from './city-globe-surface';
 import type { WaterFeature } from './water';
 
 type Point = { longitude: number; latitude: number };
 type Answer = Point & { correct: boolean };
 type CityTarget = Point & { toleranceKm: number };
+type AtlasPolygon = { path: Path2D; bounds: THREE.Box2 };
 type WaterAtlas = {
   feature: WaterFeature;
   path: Path2D;
@@ -29,10 +30,32 @@ function geographic(point: THREE.Vector3): Point {
   return { longitude: Math.atan2(point.x, point.z) / radians, latitude: Math.asin(THREE.MathUtils.clamp(point.y / point.length(), -1, 1)) / radians };
 }
 
+function createAtlasPolygon(polygon: number[][][], width: number, height: number): AtlasPolygon {
+  const scale = width / 360;
+  const path = new Path2D();
+  const bounds = new THREE.Box2();
+  for (const ring of polygon) {
+    ring.forEach(([longitude, latitude], index) => {
+      const x = (longitude + 180) * scale;
+      const y = (90 - latitude) * scale;
+      if (index === 0) path.moveTo(x, y);
+      else path.lineTo(x, y);
+      bounds.min.set(Math.min(bounds.min.x, x), Math.min(bounds.min.y, y));
+      bounds.max.set(Math.max(bounds.max.x, x), Math.max(bounds.max.y, y));
+    });
+    path.closePath();
+  }
+  // Include the widest highlight's miter (3px * default miterLimit / 2)
+  // and its antialiased edge, including on neighboring countries.
+  bounds.min.floor().subScalar(16).max(new THREE.Vector2());
+  bounds.max.ceil().addScalar(16).min(new THREE.Vector2(width, height));
+  return { path, bounds };
+}
+
 function createWaterAtlas(feature: WaterFeature, width: number, height: number): WaterAtlas {
   const geometry = feature.geometry;
   const fill = geometry.type === 'Polygon' || geometry.type === 'MultiPolygon';
-  const drawn = feature.properties.kind !== 'ocean';
+  const drawn = feature.properties.kind !== 'ocean' && feature.properties.kind !== 'lake';
   const polygons = geometry.type === 'Polygon' ? [geometry.coordinates]
     : geometry.type === 'MultiPolygon' ? geometry.coordinates
     : geometry.type === 'LineString' ? [[geometry.coordinates]] : geometry.coordinates.map(line => [line]);
@@ -154,7 +177,8 @@ export class Globe {
   private controls: OrbitControls;
   private readonly texture: THREE.CanvasTexture;
   private readonly patchTexture = new THREE.Texture(document.createElement('canvas'));
-  private readonly atlasPolygons: { country: Country; path: Path2D; bounds: THREE.Box2 }[] = [];
+  private readonly atlasPolygons: (AtlasPolygon & { country: Country })[] = [];
+  private readonly inlandWaterPolygons: AtlasPolygon[] = [];
   private waterFeatures: readonly WaterFeature[] = [];
   private readonly waterAtlas: WaterAtlas[] = [];
   private waterTarget?: WaterAtlas;
@@ -224,28 +248,18 @@ export class Globe {
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
     this.texture.onUpdate = () => { this.textureUploaded = true; };
-    const scale = atlas.width / 360;
     for (const country of countries) {
       const polygons = country.geometry.type === 'Polygon' ? [country.geometry.coordinates] : country.geometry.coordinates;
       for (const polygon of polygons) {
-        const path = new Path2D();
-        const bounds = new THREE.Box2();
-        for (const ring of polygon) {
-          ring.forEach(([longitude, latitude], index) => {
-            const x = (longitude + 180) * scale;
-            const y = (90 - latitude) * scale;
-            if (index === 0) path.moveTo(x, y);
-            else path.lineTo(x, y);
-            bounds.min.set(Math.min(bounds.min.x, x), Math.min(bounds.min.y, y));
-            bounds.max.set(Math.max(bounds.max.x, x), Math.max(bounds.max.y, y));
-          });
-          path.closePath();
-        }
-        // Include the widest highlight's miter (3px * default miterLimit / 2)
-        // and its antialiased edge, including on neighboring countries.
-        bounds.min.floor().subScalar(16).max(new THREE.Vector2());
-        bounds.max.ceil().addScalar(16).min(new THREE.Vector2(atlas.width, atlas.height));
-        this.atlasPolygons.push({ country, path, bounds });
+        this.atlasPolygons.push({ country, ...createAtlasPolygon(polygon, atlas.width, atlas.height) });
+      }
+    }
+    // Ordinary inland water is basemap context, independent of quiz geometry.
+    // Keep each polygon's rings together so even-odd fills preserve islands.
+    for (const water of inlandWaters) {
+      const polygons = water.geometry.type === 'Polygon' ? [water.geometry.coordinates] : water.geometry.coordinates;
+      for (const polygon of polygons) {
+        this.inlandWaterPolygons.push(createAtlasPolygon(polygon, atlas.width, atlas.height));
       }
     }
     this.surface = new THREE.Mesh(new THREE.SphereGeometry(1, 128, 64), new THREE.MeshBasicMaterial({ map: this.texture }));
@@ -544,6 +558,14 @@ export class Globe {
       context.fill(path, 'evenodd');
       context.stroke(path);
     }
+    context.fillStyle = '#172d3b';
+    context.strokeStyle = '#63777f';
+    context.lineWidth = 0.8;
+    for (const { path, bounds } of this.inlandWaterPolygons) {
+      if (region && !region.intersectsBox(bounds)) continue;
+      context.fill(path, 'evenodd');
+      context.stroke(path);
+    }
     for (const water of this.waterAtlas) {
       if (region && !water.bounds.some(bounds => region.intersectsBox(bounds))) continue;
       this.paintWater(context, water, false);
@@ -685,9 +707,9 @@ export class Globe {
     this.waterAtlas.length = 0;
     if (features.length) this.highlighted = undefined;
     const canvas = this.texture.image as HTMLCanvasElement;
-    // Oceans keep the default surface color. Build their camera framing only
-    // when revealed, rather than projecting invisible ocean paths into the atlas.
-    for (const kind of ['sea', 'lake', 'river'] as const) {
+    // Lakes and oceans keep their ordinary basemap appearance. Build framing
+    // from versioned quiz geometry only when revealed, without visible paths.
+    for (const kind of ['sea', 'river'] as const) {
       for (const feature of features) {
         if (feature.properties.kind === kind) this.waterAtlas.push(createWaterAtlas(feature, canvas.width, canvas.height));
       }
@@ -702,7 +724,8 @@ export class Globe {
     if (reveal && feature?.properties.id === this.waterTarget?.feature.properties.id) return;
     const target = reveal && feature
       ? this.waterAtlas.find(water => water.feature.properties.id === feature.properties.id)
-        ?? (feature.properties.kind === 'ocean' && this.waterFeatures.some(water => water.properties.id === feature.properties.id)
+        ?? ((feature.properties.kind === 'ocean' || feature.properties.kind === 'lake') &&
+          this.waterFeatures.some(water => water.properties.id === feature.properties.id)
           ? createWaterAtlas(feature, this.texture.image.width, this.texture.image.height) : undefined)
       : undefined;
     if (target === this.waterTarget) return;
