@@ -598,7 +598,7 @@ function renderQuestion(animate = true) {
   factCard.replaceChildren();
   next.hidden = !answer && !reading;
   next.firstChild!.textContent = reading ? 'Next fact card ' : 'Next learning item ';
-  retry.hidden = !answer || answer.correct;
+  retry.hidden = !session.canRetry;
   document.querySelector<HTMLElement>('#retry-note')!.hidden = session.questionKind !== 'retry';
   document.querySelector<HTMLElement>('#practice-note')!.hidden = session.questionKind !== 'practice';
   document.querySelector('#retry-note')!.textContent = shape

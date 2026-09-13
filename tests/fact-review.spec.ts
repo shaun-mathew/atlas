@@ -153,3 +153,71 @@ test('city location updates preserve the old answer and grade the future review 
   expect(result.targetLongitude).toBe(result.updatedLongitude);
   expect(result.savedHistory).toEqual(result.original);
 });
+
+test('unavailable historical boundaries remain durable without displaying current geometry as old feedback', async ({ page }) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const sessionPath = '/src/session.ts';
+    const progressPath = '/src/progress.ts';
+    const { LearnerSession } = await import(sessionPath) as typeof SessionModule;
+    const { initialProgress } = await import(progressPath) as typeof ProgressModule;
+    const state = initialProgress();
+    state.started = true;
+    state.attempts = [{ id: 'old-boundaries', countryId: 'BRA', skill: 'name-to-location', kind: 'new',
+      boundaryVersion: 'unavailable-boundaries', factVersion: '2026-09-07', longitude: -52, latitude: -12,
+      correct: true, assisted: false, selectedCountry: 'Brazil', answeredAt: '2026-09-11T12:00:00.000Z' }];
+    const learner = new LearnerSession(null, state);
+    return { original: state.attempts, saved: learner.snapshot().attempts, feedback: learner.feedback };
+  });
+  expect(result.feedback).toBeUndefined();
+  expect(result.saved).toEqual(result.original);
+});
+
+test('historical city feedback cannot retry a retired capital role or changed country relationship', async ({ page }) => {
+  await page.goto('/');
+  const result = await page.evaluate(async () => {
+    const sessionPath = '/src/session.ts';
+    const progressPath = '/src/progress.ts';
+    const factsPath = '/src/facts.ts';
+    const citiesPath = '/src/cities.ts';
+    const releasesPath = '/src/fact-releases.ts';
+    const { LearnerSession } = await import(sessionPath) as typeof SessionModule;
+    const { initialProgress, boundaryVersion } = await import(progressPath) as typeof ProgressModule;
+    const { countryFactReleases } = await import(factsPath) as typeof FactsModule;
+    const { cities, getCityFacts, cityToleranceKm } = await import(citiesPath) as typeof CitiesModule;
+    const { FactReleases } = await import(releasesPath) as typeof ReleasesModule;
+    const city = cities.find(city => city.countryId === 'BRA' && city.capital)!;
+    const original = getCityFacts(city.id, '2026-09-11');
+    const release = {
+      version: '2026-09-11', reviewedAt: '2026-09-11', facts: { [city.id]: original.city },
+      sources: Object.fromEntries(original.city.sourceIds.map((id, index) => [id, original.sources[index]])),
+      provenance: { [city.id]: { referenceYear: null, geographicScope: 'Representative city centre.' } }, changes: [],
+    };
+    const state = initialProgress();
+    state.started = true;
+    state.selection = { scope: 'capitals', continent: 'Worldwide', region: 'All regions', learning: 'capital-to-location' };
+    state.current = { countryId: city.countryId, cityId: city.id, skill: 'capital-to-location', kind: 'new', assisted: false };
+    state.attempts = [{ ...state.current, id: 'old-relationship', boundaryVersion, factVersion: '2026-09-11',
+      longitude: 0, latitude: 0, distanceKm: 1000, toleranceKm: cityToleranceKm,
+      correct: false, selectedCountry: null, answeredAt: '2026-09-11T12:00:00.000Z' }];
+    return [
+      { ...city, capital: false, capitalRole: null },
+      { ...city, countryId: 'ARG' },
+    ].map(updatedCity => {
+      const content = { countries: countryFactReleases, cities: new FactReleases([
+        release, { ...release, version: 'relationship-update', reviewedAt: '2026-09-12', facts: { [city.id]: updatedCity } },
+      ]) };
+      const learner = new LearnerSession(null, state, content);
+      const before = learner.snapshot();
+      learner.retry();
+      const after = learner.snapshot();
+      const restored = new LearnerSession(null, after, content);
+      return { before, after, feedback: restored.feedback, original: state.attempts[0], retryAvailable: learner.canRetry };
+    });
+  });
+  for (const scenario of result) {
+    expect(scenario.after).toEqual(scenario.before);
+    expect(scenario.retryAvailable).toBe(false);
+    expect(scenario.feedback).toEqual(scenario.original);
+  }
+});

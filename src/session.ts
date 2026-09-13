@@ -100,7 +100,7 @@ export class LearnerSession {
   private canPresentAttempt(attempt: Attempt): boolean {
     return attempt.cityId === undefined
       ? (attempt.skill === 'name-to-location' || attempt.skill === 'location-to-name-recognition' || attempt.skill === 'shape-recognition')
-        && this.content.countries.has(attempt.countryId, attempt.factVersion)
+        && attempt.boundaryVersion === boundaryVersion && this.content.countries.has(attempt.countryId, attempt.factVersion)
       : (attempt.skill === 'name-to-location' || attempt.skill === 'capital-to-location')
         && this.content.cities.has(attempt.cityId, attempt.factVersion);
   }
@@ -147,6 +147,10 @@ export class LearnerSession {
     return this.content.cities.has(id, version) ? this.content.cities.get(id, version).facts : null;
   }
   get feedback() { return this.readingFacts ? undefined : this.attempts[this.cursor]; }
+  get canRetry() {
+    const answer = this.feedback;
+    return !!answer && !answer.correct && this.supportsAttempt(answer);
+  }
   get proficiency() {
     return !this.readingFacts && this.state.current ? this.learningItems.get(learningItemKey(this.state.current)) : undefined;
   }
@@ -374,7 +378,7 @@ export class LearnerSession {
   }
 
   retry() {
-    if (!this.feedback || this.feedback.correct) return;
+    if (!this.feedback || !this.canRetry) return;
     this.state.current = {
       countryId: this.feedback.countryId, skill: this.skill, kind: 'retry',
       ...(this.feedback.cityId === undefined ? {} : { cityId: this.feedback.cityId }),
