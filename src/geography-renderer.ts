@@ -91,7 +91,9 @@ export class GeographyRenderer extends L.SVG {
     const visible = L.bounds(point.subtract(half), point.add(half));
     if (this._bounds.contains(visible)) return;
     const padded = half.multiplyBy(1 + 2 * (this.options.padding ?? 0.1));
-    const bounds = L.bounds(point.subtract(padded), point.add(padded));
+    // Leaflet rounds clipped line intersections. Fractional edges can leave a
+    // rounded intersection outside the same edge forever, so expand to pixels.
+    const bounds = L.bounds(point.subtract(padded).floor(), point.add(padded).ceil());
     // CSS interpolates between both views. Flights/pans only need a buffer
     // around the current view, otherwise a long flight accumulates the world.
     if (retain) bounds.extend(this._bounds.min!).extend(this._bounds.max!);

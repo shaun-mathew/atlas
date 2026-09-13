@@ -221,3 +221,49 @@ test('next item during answer zoom never shrinks land below the returning world 
   expect(widths.interrupted / widths.settled).toBeGreaterThan(1.5);
   expect(Math.min(...widths.frames) / widths.settled).toBeGreaterThan(0.9);
 });
+
+test('zooming out past a river line completes and keeps it visible', async ({ page }) => {
+  test.setTimeout(10_000);
+  let leafletUrl = '';
+  page.on('response', response => {
+    if (response.url().includes('/deps/leaflet.js')) leafletUrl = response.url();
+  });
+  await page.clock.install({ time: new Date('2030-01-01T00:00:00Z') });
+  await page.clock.pauseAt(new Date('2030-01-01T00:00:01.024Z'));
+  await page.goto('/');
+  await page.locator('#map .leaflet-overlay-pane path').first().waitFor({ state: 'attached' });
+  const fixture = await page.evaluateHandle(async url => {
+    const L: typeof Leaflet = (await import(/* @vite-ignore */ url)).default;
+    // This fixture runs in the browser; a static Node import cannot construct its renderer.
+    const rendererUrl = '/src/geography-renderer.ts';
+    const { GeographyRenderer } = await import(/* @vite-ignore */ rendererUrl);
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed;inset:0;width:200px;height:200px;z-index:1000';
+    document.body.append(container);
+    const map = L.map(container, {
+      minZoom: 0, zoomControl: false, attributionControl: false,
+      renderer: new GeographyRenderer({ padding: 0.5 }),
+    }).setView([0, 0], 2);
+    // This line crosses the expanding clip window during the zoom-out.
+    // The controlled clock exercises a fractional edge before arrival.
+    const line = L.polyline([
+      map.containerPointToLatLng([250, 0]),
+      map.containerPointToLatLng([250, 600]),
+    ], { weight: 3 }).addTo(map);
+    const point = map.containerPointToLatLng([250, 100]);
+    map.flyTo([0, 0], 0, { animate: true, duration: 0.8 });
+    return { map, line, point };
+  }, leafletUrl);
+  await page.clock.runFor(1000);
+  const result = await fixture.evaluate(({ map, line, point }) => {
+    const pixel = map.latLngToLayerPoint(point);
+    const drawn = (line.getElement() as SVGPathElement).isPointInStroke(new DOMPoint(pixel.x, pixel.y));
+    const zoom = map.getZoom();
+    const container = map.getContainer();
+    map.remove();
+    container.remove();
+    return { zoom, drawn };
+  });
+  await fixture.dispose();
+  expect(result).toEqual({ zoom: 0, drawn: true });
+});
