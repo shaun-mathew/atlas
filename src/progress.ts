@@ -1,30 +1,33 @@
 import { z } from 'zod';
 import { countries, introductionOrder } from './geography';
-import { facetSelectionSchema, matchesCityFacets, matchesFacets, practiceCandidateCount } from './facets';
+import { facetSelectionSchema, matchesCityFacets, matchesFacets, matchesWaterFacets, practiceCandidateCount } from './facets';
 import { citiesById, cityFactReleases } from './cities';
+import { waterById } from './water';
 
 export const boundaryVersion = 'natural-earth-5.1.2-50m';
 const firstFactVersion = '2026-09-07';
 const countryIdSchema = z.string().min(1).max(128);
+const factVersionSchema = z.string().min(1).max(128);
 const questionKindSchema = z.enum(['new', 'review', 'practice', 'retry']);
 const spatialSkillSchema = z.enum(['name-to-location', 'capital-to-location', 'location-to-name-recognition', 'shape-recognition']);
 const previousKindSchema = questionKindSchema.or(z.literal('diagnostic'))
   .transform(kind => kind === 'diagnostic' ? 'new' as const : kind);
 const questionSchema = z.object({
-  countryId: countryIdSchema,
+  countryId: countryIdSchema.optional(),
   cityId: countryIdSchema.optional(),
+  waterId: countryIdSchema.optional(),
   skill: spatialSkillSchema.default('name-to-location'),
   kind: questionKindSchema,
   assisted: z.boolean().default(false),
 });
 const attemptSchema = z.object({
   id: z.string().min(1).max(256),
-  countryId: countryIdSchema,
+  countryId: countryIdSchema.optional(),
   cityId: countryIdSchema.optional(),
+  waterId: countryIdSchema.optional(),
   skill: z.string().min(1).max(128),
   boundaryVersion: z.string().min(1).max(128),
-  // The first fact release also describes attempts made before fact cards existed.
-  factVersion: z.string().min(1).max(128).default(firstFactVersion),
+  factVersion: factVersionSchema,
   longitude: z.number().min(-180).max(180).optional(),
   latitude: z.number().min(-90).max(90).optional(),
   distanceKm: z.number().finite().nonnegative().optional(),
@@ -41,9 +44,10 @@ const attemptSchema = z.object({
 });
 const factPresentationSchema = z.object({
   id: z.string().min(1).max(256),
-  countryId: countryIdSchema,
+  countryId: countryIdSchema.optional(),
   cityId: countryIdSchema.optional(),
-  factVersion: z.string().min(1).max(128),
+  waterId: countryIdSchema.optional(),
+  factVersion: factVersionSchema,
   presentedAt: z.iso.datetime().transform(value => new Date(value).toISOString()),
   attemptId: z.string().min(1).max(256).optional(),
 }).readonly();
@@ -64,10 +68,12 @@ export type Attempt = Progress['attempts'][number];
 export type FactPresentation = Progress['factPresentations'][number];
 type Question = NonNullable<Progress['current']>;
 export type SpatialSkill = Question['skill'];
-function entityKey(item: { countryId: string; cityId?: string }): string {
-  return item.cityId === undefined ? item.countryId : `city:${item.cityId}`;
+type EntityIdentity = { countryId?: string; cityId?: string; waterId?: string };
+function entityKey(item: EntityIdentity): string {
+  if (item.waterId !== undefined) return `water:${item.waterId}`;
+  return item.cityId === undefined ? item.countryId! : `city:${item.cityId}`;
 }
-export function learningItemKey(item: { countryId: string; cityId?: string; skill: string }): string {
+export function learningItemKey(item: EntityIdentity & { skill: string }): string {
   return `${entityKey(item)}:${item.skill}`;
 }
 
@@ -85,7 +91,12 @@ export function initialProgress(): Progress {
   };
 }
 
-const savedAttemptSchema = attemptSchema.extend({ id: attemptSchema.shape.id.optional() });
+const savedAttemptSchema = attemptSchema.extend({
+  id: attemptSchema.shape.id.optional(),
+  // Country history predating fact cards uses the first release; water history
+  // must always state which release supplied the assessment.
+  factVersion: factVersionSchema.optional(),
+});
 const savedProgressSchema = normalizedProgressSchema.extend({ attempts: z.array(savedAttemptSchema) });
 const previousProgressSchema = savedProgressSchema.extend({
   version: z.union([z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.literal(6)]),
@@ -146,6 +157,7 @@ function attemptContent(attempt: Omit<Attempt, 'id'>): string {
   if (attempt.cityId !== undefined || attempt.distanceKm !== undefined || attempt.toleranceKm !== undefined) {
     content.push({ cityId: attempt.cityId, distanceKm: attempt.distanceKm, toleranceKm: attempt.toleranceKm });
   }
+  if (attempt.waterId !== undefined) content.push({ waterId: attempt.waterId });
   return JSON.stringify(content);
 }
 
@@ -161,10 +173,12 @@ function unionAttempts(attempts: Attempt[]): Attempt[] {
 }
 
 function factPresentationContent(presentation: FactPresentation): string {
-  return JSON.stringify([
+  const content = [
     presentation.countryId, presentation.cityId, presentation.factVersion,
     presentation.presentedAt, presentation.attemptId,
-  ]);
+  ];
+  if (presentation.waterId !== undefined) content.push(presentation.waterId);
+  return JSON.stringify(content);
 }
 
 function unionFactPresentations(presentations: FactPresentation[]): FactPresentation[] {
@@ -186,13 +200,35 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
     const readingCountry = state.readingCountryId === null ? undefined
       : countries.find(country => country.properties.id === state.readingCountryId);
     const currentCity = state.current?.cityId === undefined ? undefined : citiesById.get(state.current.cityId);
-    if (state.current && !answer && state.selection?.learning !== 'country-facts'
-      && (state.current.cityId !== undefined || (state.selection !== null && state.selection.scope !== 'countries'))
-      && (!currentCity || !state.selection || !matchesCityFacets(currentCity, state.selection)
-        || state.current.skill !== state.selection.learning)) {
-      context.addIssue({ code: 'custom', message: 'The active city question must match the selected scope and skill.' });
+    const currentWater = state.current?.waterId === undefined ? undefined : waterById.get(state.current.waterId);
+    if (state.current && !answer && state.selection?.learning !== 'country-facts') {
+      if (state.current.waterId !== undefined || state.selection?.scope === 'water') {
+        if (!currentWater || state.selection?.scope !== 'water' || !matchesWaterFacets(currentWater, state.selection)
+          || state.current.skill !== state.selection.learning) {
+          context.addIssue({ code: 'custom', message: 'The active water question must match the selected scope and skill.' });
+        }
+      } else if ((state.current.cityId !== undefined || (state.selection !== null && state.selection.scope !== 'countries'))
+        && (!currentCity || !state.selection || !matchesCityFacets(currentCity, state.selection)
+          || state.current.skill !== state.selection.learning)) {
+        context.addIssue({ code: 'custom', message: 'The active city question must match the selected scope and skill.' });
+      }
+    }
+    for (const item of [...state.pausedQuestions, ...(state.current ? [state.current] : []),
+      ...state.attempts, ...state.factPresentations]) {
+      if (item.waterId !== undefined
+        ? item.countryId !== undefined || item.cityId !== undefined
+        : item.countryId === undefined) {
+        context.addIssue({ code: 'custom', message: 'An entity must be a country, a city with its country, or a water feature without an owning country.' });
+      }
     }
     for (const item of [...state.pausedQuestions, ...(state.current && !answer ? [state.current] : []), ...state.attempts]) {
+      if (item.waterId !== undefined) {
+        if (item.skill !== 'name-to-location'
+          || (!('answeredAt' in item) && !waterById.has(item.waterId))) {
+          context.addIssue({ code: 'custom', message: 'Water learning items require a known feature and the name-to-location skill.' });
+        }
+        continue;
+      }
       if (item.cityId === undefined) {
         if (item.skill === 'capital-to-location') {
           context.addIssue({ code: 'custom', message: 'Capital questions require a canonical city.' });
@@ -201,9 +237,9 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
       }
       // Answered history belongs to its release, not today's catalogue or roles.
       // Unavailable releases stay durable but cannot supply current assessment.
-      if ('factVersion' in item && !cityFactReleases.has(item.cityId, item.factVersion)) continue;
-      const city = 'factVersion' in item
-        ? cityFactReleases.get(item.cityId, item.factVersion).facts : citiesById.get(item.cityId);
+      const version = 'answeredAt' in item ? item.factVersion ?? firstFactVersion : undefined;
+      if (version !== undefined && !cityFactReleases.has(item.cityId, version)) continue;
+      const city = version === undefined ? citiesById.get(item.cityId) : cityFactReleases.get(item.cityId, version).facts;
       if (!city || city.countryId !== item.countryId
         || (item.skill !== 'name-to-location' && item.skill !== 'capital-to-location')
         || (item.skill === 'capital-to-location' && !city.capital)) {
@@ -211,18 +247,22 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
       }
     }
     for (const attempt of state.attempts) {
+      if (attempt.waterId !== undefined && attempt.factVersion === undefined) {
+        context.addIssue({ code: 'custom', message: 'Water answers require an explicit fact version.' });
+      }
       const recognition = attempt.skill === 'location-to-name-recognition' || attempt.skill === 'shape-recognition';
       if (recognition
         ? attempt.selectedCountryId === undefined || attempt.longitude !== undefined || attempt.latitude !== undefined
         : attempt.longitude === undefined || attempt.latitude === undefined) {
         context.addIssue({ code: 'custom', message: 'An answer must contain a selected entity or a geographic point for its skill.' });
       }
-      if (attempt.cityId === undefined
+      if (attempt.cityId === undefined && attempt.waterId === undefined
         ? attempt.distanceKm !== undefined || attempt.toleranceKm !== undefined
         : attempt.distanceKm === undefined || attempt.toleranceKm === undefined
           || attempt.selectedCountryId !== undefined
+          || (attempt.waterId !== undefined && attempt.selectedCountry !== null)
           || attempt.correct !== (attempt.distanceKm <= attempt.toleranceKm)) {
-        context.addIssue({ code: 'custom', message: 'City answers require a consistent distance and tolerance.' });
+        context.addIssue({ code: 'custom', message: 'City and water answers require a consistent distance and tolerance.' });
       }
     }
     if (state.cursor > state.attempts.length
@@ -232,7 +272,8 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
       || (!answer && state.selection !== null && practiceCandidateCount(state.selection) === 0)
       || (state.selection?.learning === 'country-facts'
         && (!readingCountry || !matchesFacets(readingCountry, state.selection)))
-      || (answer && (answer.countryId !== state.current?.countryId || answer.cityId !== state.current?.cityId || answer.kind !== state.current.kind
+      || (answer && (!state.current || answer.countryId !== state.current.countryId || answer.cityId !== state.current.cityId
+        || answer.waterId !== state.current.waterId || answer.kind !== state.current.kind
         // Unsupported historical skills remain durable; session replay skips
         // them and selects a supported prompt rather than discarding the save.
         || ((answer.skill === 'name-to-location' || answer.skill === 'capital-to-location' || answer.skill === 'location-to-name-recognition' || answer.skill === 'shape-recognition')
@@ -241,7 +282,8 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
     }
   }).transform((state, context): Progress => {
     const withIds = state.attempts.map((attempt, index) => ({
-      ...attempt, id: attempt.id ?? legacyAttemptId(attempt, index),
+      ...attempt, factVersion: attempt.factVersion ?? firstFactVersion,
+      id: attempt.id ?? legacyAttemptId({ ...attempt, factVersion: attempt.factVersion ?? firstFactVersion }, index),
     }));
     const answerId = withIds[state.cursor]?.id;
     let attempts: Attempt[];
@@ -265,8 +307,9 @@ export const progressSchema = z.union([savedProgressSchema, previousProgressSche
 const kindRank: Record<Question['kind'], number> = { retry: 0, practice: 1, new: 2, review: 3 };
 function mergeQuestion(left: Question, right: Question): Question {
   return {
-    countryId: left.countryId,
+    ...(left.countryId === undefined ? {} : { countryId: left.countryId }),
     ...(left.cityId === undefined ? {} : { cityId: left.cityId }),
+    ...(left.waterId === undefined ? {} : { waterId: left.waterId }),
     skill: left.skill,
     kind: kindRank[left.kind] < kindRank[right.kind] ? left.kind : right.kind,
     assisted: left.assisted || right.assisted,

@@ -2,22 +2,24 @@ import { booleanPointInPolygon } from '@turf/boolean-point-in-polygon';
 import { pointToPolygonDistance } from '@turf/point-to-polygon-distance';
 import { countries, introductionOrder, matchesCountrySearch, normalizeCountrySearch } from './geography';
 import { countryFactReleases } from './facts';
-import { facetSelectionSchema, matchesCityFacets, matchesFacets, practiceCandidateCount, type FacetSelection } from './facets';
+import { facetSelectionSchema, matchesCityFacets, matchesFacets, matchesWaterFacets, practiceCandidateCount, type FacetSelection } from './facets';
 import { boundaryVersion, initialProgress, learningItemKey, progressSchema, type Attempt, type Progress, type SpatialSkill } from './progress';
 import { scheduleReview, type Proficiency } from './scheduler';
 import { cities, citiesById, cityFactReleases, cityDistanceKm, cityToleranceKm, type City } from './cities';
 import { cityIntroductionOrder, capitalIntroductionOrder } from './city-introductions';
+import { waterFeatures, waterById, waterFactReleases, waterDistanceKm, waterToleranceKm, waterGeometryVersion, type WaterFeature } from './water';
 
 const countriesById = new Map(countries.map(country => [country.properties.id, country]));
 const recommendedSkills: readonly SpatialSkill[] = ['name-to-location', 'location-to-name-recognition', 'shape-recognition'];
 const recognitionFamiliarCountryCount = 40;
 type Question = NonNullable<Progress['current']>;
-type LearningEntity = Pick<Question, 'countryId' | 'cityId'>;
+type LearningEntity = Pick<Question, 'countryId' | 'cityId' | 'waterId'>;
 const countryItems: LearningEntity[] = countries.map(country => ({ countryId: country.properties.id }));
 const countryIntroductions: LearningEntity[] = introductionOrder.map(country => ({ countryId: country.properties.id }));
 const cityItems: LearningEntity[] = cities.map(city => ({ countryId: city.countryId, cityId: city.id }));
 const cityIntroductions: LearningEntity[] = cityIntroductionOrder.map(city => ({ countryId: city.countryId, cityId: city.id }));
 const capitalIntroductions: LearningEntity[] = capitalIntroductionOrder.map(city => ({ countryId: city.countryId, cityId: city.id }));
+const waterItems: LearningEntity[] = waterFeatures.map(water => ({ waterId: water.properties.id }));
 
 
 // Attempts are the durable source of skill proficiency and scheduling state.
@@ -29,11 +31,19 @@ export class LearnerSession {
   private selectionCounts = new Map<string, { attempts: number; introductions: number }>();
   private shapeMissCounts = new Map<string, number>();
   private readonly storageKey: string | null;
+  private readonly content: {
+    countries: typeof countryFactReleases;
+    cities: typeof cityFactReleases;
+    water: typeof waterFactReleases;
+  };
+  private waterPresentation: WaterFeature | null = null;
   onchange?: () => void;
   storageNotice = '';
 
   constructor(storageKey: string | null = 'atlas-practice.guest', initial?: Progress,
-    private readonly content = { countries: countryFactReleases, cities: cityFactReleases }) {
+    content: { countries: typeof countryFactReleases; cities: typeof cityFactReleases; water?: typeof waterFactReleases }
+      = { countries: countryFactReleases, cities: cityFactReleases }) {
+    this.content = { ...content, water: content.water ?? waterFactReleases };
     this.storageKey = storageKey;
     if (initial !== undefined) {
       this.replace(initial);
@@ -61,30 +71,46 @@ export class LearnerSession {
     this.save();
   }
 
-  recordFactPresentation(countryId: string, version: string, cityId?: string, attemptId?: string): void {
+  recordFactPresentation(countryId: string | undefined, version: string, cityId?: string, attemptId?: string, waterId?: string): void {
     if (!this.started) return;
-    if (cityId === undefined) this.content.countries.get(countryId, version);
-    else if (this.content.cities.get(cityId, version).facts.countryId !== countryId) {
-      throw new Error('Fact presentation must use the city’s versioned country relationship.');
+    if (waterId !== undefined) {
+      if (countryId !== undefined || cityId !== undefined) {
+        throw new Error('A water fact presentation cannot have an owning country or city.');
+      }
+      this.content.water.get(waterId, version);
+    } else {
+      if (countryId === undefined) throw new Error('Country and city fact presentations require a country.');
+      if (cityId === undefined) this.content.countries.get(countryId, version);
+      else if (this.content.cities.get(cityId, version).facts.countryId !== countryId) {
+        throw new Error('Fact presentation must use the city’s versioned country relationship.');
+      }
     }
     if (attemptId !== undefined) {
       const attempt = this.attempts.find(attempt => attempt.id === attemptId);
-      if (!attempt || attempt.countryId !== countryId || attempt.cityId !== cityId || attempt.factVersion !== version) {
+      if (!attempt || attempt.countryId !== countryId || attempt.cityId !== cityId || attempt.waterId !== waterId
+        || attempt.factVersion !== version) {
         throw new Error('Fact presentation must match the associated attempt.');
       }
     }
     const previous = this.state.factPresentations.at(-1);
-    if (previous?.countryId === countryId && previous.cityId === cityId
+    if (previous && previous.countryId === countryId && previous.cityId === cityId && previous.waterId === waterId
       && previous.factVersion === version && previous.attemptId === attemptId) return;
     this.state.factPresentations.push(Object.freeze({
       id: `fact-presentation-${this.state.factPresentations.length.toString(36).padStart(10, '0')}-${crypto.randomUUID()}`,
-      countryId, ...(cityId === undefined ? {} : { cityId }), factVersion: version,
+      ...(countryId === undefined ? {} : { countryId }), ...(cityId === undefined ? {} : { cityId }),
+      ...(waterId === undefined ? {} : { waterId }), factVersion: version,
       presentedAt: new Date().toISOString(), ...(attemptId === undefined ? {} : { attemptId }),
     }));
     this.save();
   }
 
   private supportsAttempt(attempt: Attempt): boolean {
+    if (attempt.waterId !== undefined) {
+      return attempt.skill === 'name-to-location' && waterById.has(attempt.waterId)
+        && attempt.boundaryVersion === waterGeometryVersion && attempt.toleranceKm === waterToleranceKm
+        && this.content.water.has(attempt.waterId, this.content.water.currentVersion)
+        && this.content.water.has(attempt.waterId, attempt.factVersion);
+    }
     if (attempt.cityId !== undefined) {
       const city = this.content.cities.has(attempt.cityId, this.content.cities.currentVersion)
         ? this.content.cities.get(attempt.cityId, this.content.cities.currentVersion).facts : undefined;
@@ -92,14 +118,19 @@ export class LearnerSession {
         && (attempt.skill === 'name-to-location' || (attempt.skill === 'capital-to-location' && city.capital))
         && this.content.cities.has(city.id, attempt.factVersion) && attempt.toleranceKm === cityToleranceKm;
     }
-    return countriesById.has(attempt.countryId)
+    return attempt.countryId !== undefined && countriesById.has(attempt.countryId)
       && (attempt.skill === 'name-to-location' || attempt.skill === 'location-to-name-recognition' || attempt.skill === 'shape-recognition')
       && attempt.boundaryVersion === boundaryVersion && this.content.countries.has(attempt.countryId, attempt.factVersion);
   }
 
   private canPresentAttempt(attempt: Attempt): boolean {
+    if (attempt.waterId !== undefined) {
+      return attempt.skill === 'name-to-location' && waterById.has(attempt.waterId)
+        && attempt.boundaryVersion === waterGeometryVersion && this.content.water.has(attempt.waterId, attempt.factVersion);
+    }
     return attempt.cityId === undefined
-      ? (attempt.skill === 'name-to-location' || attempt.skill === 'location-to-name-recognition' || attempt.skill === 'shape-recognition')
+      ? attempt.countryId !== undefined
+        && (attempt.skill === 'name-to-location' || attempt.skill === 'location-to-name-recognition' || attempt.skill === 'shape-recognition')
         && attempt.boundaryVersion === boundaryVersion && this.content.countries.has(attempt.countryId, attempt.factVersion)
       : (attempt.skill === 'name-to-location' || attempt.skill === 'capital-to-location')
         && this.content.cities.has(attempt.cityId, attempt.factVersion);
@@ -113,7 +144,9 @@ export class LearnerSession {
     for (const attempt of this.attempts) this.recordAttempt(attempt);
     const current = this.state.current;
     const answer = this.attempts[this.cursor];
-    if (current && (!countriesById.has(current.countryId) || (answer && !this.canPresentAttempt(answer)))) {
+    const knownCurrent = current && (current.waterId !== undefined
+      ? waterById.has(current.waterId) : current.countryId !== undefined && countriesById.has(current.countryId));
+    if (current && (!knownCurrent || (answer && !this.canPresentAttempt(answer)))) {
       if (!answer) this.state.pausedQuestions.push(current);
       this.state.current = null;
       this.state.cursor = this.attempts.length;
@@ -146,6 +179,17 @@ export class LearnerSession {
     const version = this.feedback?.factVersion ?? this.content.cities.currentVersion;
     return this.content.cities.has(id, version) ? this.content.cities.get(id, version).facts : null;
   }
+  get water(): WaterFeature | null {
+    const id = this.readingFacts ? undefined : this.state.current?.waterId;
+    const feature = id === undefined ? undefined : waterById.get(id);
+    const version = this.feedback?.factVersion ?? this.content.water.currentVersion;
+    if (!feature || !this.content.water.has(feature.properties.id, version)) return null;
+    const properties = this.content.water.get(feature.properties.id, version).facts;
+    if (!this.waterPresentation || this.waterPresentation.geometry !== feature.geometry || this.waterPresentation.properties !== properties) {
+      this.waterPresentation = { ...feature, properties };
+    }
+    return this.waterPresentation;
+  }
   get feedback() { return this.readingFacts ? undefined : this.attempts[this.cursor]; }
   get canRetry() {
     const answer = this.feedback;
@@ -168,6 +212,7 @@ export class LearnerSession {
     if (practiceCandidateCount(nextSelection) === 0) return false;
     if (this.started && nextSelection?.scope === this.selection?.scope
       && nextSelection?.continent === this.selection?.continent
+      && nextSelection?.countryId === this.selection?.countryId
       && nextSelection?.region === this.selection?.region && nextSelection?.learning === this.selection?.learning) return true;
     this.state.selection = nextSelection;
     if (this.readingFacts) {
@@ -192,7 +237,7 @@ export class LearnerSession {
       ? [this.state.current, ...this.state.pausedQuestions] : this.state.pausedQuestions;
     let changed = false;
     for (const question of pending) {
-      if (question.cityId !== undefined || question.countryId !== countryId || question.assisted) continue;
+      if (question.cityId !== undefined || question.waterId !== undefined || question.countryId !== countryId || question.assisted) continue;
       question.assisted = true;
       changed = true;
     }
@@ -273,9 +318,11 @@ export class LearnerSession {
       return;
     }
     const item = scheduleReview(previous, attempt);
-    const reviewAfter = attempt.cityId === undefined
-      ? this.content.countries.reviewAfter(attempt.countryId, attempt.skill, attempt.factVersion)
-      : this.content.cities.reviewAfter(attempt.cityId, attempt.skill, attempt.factVersion);
+    const reviewAfter = attempt.waterId !== undefined
+      ? this.content.water.reviewAfter(attempt.waterId, attempt.skill, attempt.factVersion)
+      : attempt.cityId !== undefined
+        ? this.content.cities.reviewAfter(attempt.cityId, attempt.skill, attempt.factVersion)
+        : this.content.countries.reviewAfter(attempt.countryId!, attempt.skill, attempt.factVersion);
     // A reviewed material change advances only this item's next check. Keep the
     // original answer and FSRS history; retries cannot discharge the check.
     if (reviewAfter && reviewAfter < item.dueAt) item.dueAt = reviewAfter;
@@ -284,7 +331,8 @@ export class LearnerSession {
 
   private recordAttempt(attempt: Attempt) {
     if (!this.supportsAttempt(attempt)) return;
-    const group = attempt.cityId === undefined ? attempt.skill : `city:${attempt.skill}`;
+    const group = attempt.waterId !== undefined ? `water:${attempt.skill}`
+      : attempt.cityId === undefined ? attempt.skill : `city:${attempt.skill}`;
     let counts = this.selectionCounts.get(group);
     if (!counts) this.selectionCounts.set(group, counts = { attempts: 0, introductions: 0 });
     const index = counts.attempts++;
@@ -297,7 +345,7 @@ export class LearnerSession {
     } else {
       history.lastSeenIndex = index;
     }
-    // Retries delay this country's next revisit without erasing its weakness.
+    // Retries delay this learning item's next revisit without erasing its weakness.
     if (attempt.kind === 'retry') return;
     history.weak = !attempt.correct || attempt.assisted;
     if (attempt.kind === 'new') counts.introductions += 1;
@@ -305,9 +353,24 @@ export class LearnerSession {
   }
 
   answer(longitude: number, latitude: number) {
-    const country = this.country;
-    if (!this.started || this.readingFacts || this.recognizingLocation || this.recognizingShape || !country || this.feedback || !Number.isFinite(longitude) || !Number.isFinite(latitude)
+    if (!this.started || this.readingFacts || this.recognizingLocation || this.recognizingShape || this.feedback || !Number.isFinite(longitude) || !Number.isFinite(latitude)
       || Math.abs(longitude) > 180 || Math.abs(latitude) > 90) return;
+    const water = this.water;
+    if (water) {
+      const distanceKm = waterDistanceKm(longitude, latitude, water);
+      this.commitAnswer({
+        id: `attempt-${this.attempts.length.toString(36).padStart(10, '0')}-${crypto.randomUUID()}`,
+        waterId: water.properties.id, skill: 'name-to-location',
+        kind: this.state.current!.kind, assisted: this.assisted,
+        boundaryVersion: waterGeometryVersion, factVersion: this.content.water.currentVersion,
+        longitude, latitude, distanceKm, toleranceKm: waterToleranceKm,
+        correct: distanceKm <= waterToleranceKm,
+        selectedCountry: null, answeredAt: new Date().toISOString(),
+      });
+      return;
+    }
+    const country = this.country;
+    if (!country) return;
     const city = this.city;
     if (city) {
       const distanceKm = cityDistanceKm(longitude, latitude, city);
@@ -380,8 +443,10 @@ export class LearnerSession {
   retry() {
     if (!this.feedback || !this.canRetry) return;
     this.state.current = {
-      countryId: this.feedback.countryId, skill: this.skill, kind: 'retry',
+      ...(this.feedback.countryId === undefined ? {} : { countryId: this.feedback.countryId }),
+      skill: this.skill, kind: 'retry',
       ...(this.feedback.cityId === undefined ? {} : { cityId: this.feedback.cityId }),
+      ...(this.feedback.waterId === undefined ? {} : { waterId: this.feedback.waterId }),
       assisted: this.feedback.assisted || (this.state.current?.assisted ?? false),
     };
     this.state.cursor = this.attempts.length;
@@ -410,9 +475,9 @@ export class LearnerSession {
     let recentAnswers = 0;
     for (let index = this.attempts.length - 1; index >= 0 && recentAnswers < 2; index--) {
       const attempt = this.attempts[index];
-      if (!this.supportsAttempt(attempt)) continue;
+      if (attempt.waterId !== undefined || !this.supportsAttempt(attempt)) continue;
       if (Date.parse(now) - Date.parse(attempt.answeredAt) >= 10 * 60 * 1000) break;
-      recentCountries.add(attempt.countryId);
+      recentCountries.add(attempt.countryId!);
       recentAnswers++;
     }
     let familiarCountries = 0;
@@ -427,7 +492,7 @@ export class LearnerSession {
     let previousSkillIndex = -1;
     for (let index = this.attempts.length - 1; index >= 0; index--) {
       const attempt = this.attempts[index];
-      if (attempt.cityId !== undefined || !this.supportsAttempt(attempt)) continue;
+      if (attempt.cityId !== undefined || attempt.waterId !== undefined || !this.supportsAttempt(attempt)) continue;
       previousSkillIndex = recommendedSkills.findIndex(skill => skill === attempt.skill);
       break;
     }
@@ -442,12 +507,15 @@ export class LearnerSession {
   }
 
   private selectAdaptive(now: string, skill: SpatialSkill, recentCountries?: ReadonlySet<string>, allowIntroductions = true): Question | undefined {
-    const cityPractice = this.selection !== null && this.selection.scope !== 'countries';
-    const counts = this.selectionCounts.get(cityPractice ? `city:${skill}` : skill);
-    const eligible = (entity: LearningEntity) => !this.selection || (entity.cityId === undefined
-      ? matchesFacets(countriesById.get(entity.countryId)!, this.selection)
-      : matchesCityFacets(citiesById.get(entity.cityId)!, this.selection));
-    const candidates = (cityPractice ? cityItems : countryItems).filter(eligible);
+    const waterPractice = this.selection?.scope === 'water';
+    const cityPractice = this.selection?.scope === 'cities' || this.selection?.scope === 'capitals';
+    const counts = this.selectionCounts.get(waterPractice ? `water:${skill}` : cityPractice ? `city:${skill}` : skill);
+    const eligible = (entity: LearningEntity) => !this.selection || (entity.waterId !== undefined
+      ? matchesWaterFacets(waterById.get(entity.waterId)!, this.selection)
+      : entity.cityId !== undefined
+        ? matchesCityFacets(citiesById.get(entity.cityId)!, this.selection)
+        : matchesFacets(countriesById.get(entity.countryId!)!, this.selection));
+    const candidates = (waterPractice ? waterItems : cityPractice ? cityItems : countryItems).filter(eligible);
     let due: LearningEntity | undefined;
     let earliestDueAt: string | undefined;
     let revisit: LearningEntity | undefined;
@@ -455,7 +523,7 @@ export class LearnerSession {
     let oldest: LearningEntity | undefined;
     let oldestSeenIndex = Infinity;
     for (const entity of candidates) {
-      if (recentCountries?.has(entity.countryId)) continue;
+      if (entity.countryId !== undefined && recentCountries?.has(entity.countryId)) continue;
       const key = learningItemKey({ ...entity, skill });
       const item = this.learningItems.get(key);
       if (item && item.dueAt <= now && (!earliestDueAt || item.dueAt < earliestDueAt)) {
@@ -476,11 +544,11 @@ export class LearnerSession {
       }
     }
     if (due) return { ...due, skill, kind: 'review' as const, assisted: false };
-    const introductions = cityPractice
+    const introductions = waterPractice ? waterItems : cityPractice
       ? skill === 'capital-to-location' ? capitalIntroductions : cityIntroductions
       : countryIntroductions;
     const unseen = allowIntroductions ? introductions.find(entity => eligible(entity)
-      && !recentCountries?.has(entity.countryId)
+      && (entity.countryId === undefined || !recentCountries?.has(entity.countryId))
       && (this.selection || skill === 'name-to-location'
         || (this.learningItems.get(learningItemKey({ ...entity, skill: 'name-to-location' }))?.level ?? 'Learning') !== 'Learning')
       && !this.selectionHistory.has(learningItemKey({ ...entity, skill }))) : undefined;

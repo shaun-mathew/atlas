@@ -1,4 +1,5 @@
 import { countries } from './geography';
+import { waterFeatures } from './water';
 import { continentRegions, defaultFacets, describeFacets, practiceCandidateCount, type FacetSelection } from './facets';
 import './facet-setup.css';
 
@@ -22,6 +23,7 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
             <label class="facet-choice"><input type="radio" name="scope" value="countries" checked aria-label="Countries & territories"><span><strong>Countries & territories</strong><small>The ${countries.length} mapped places in Atlas</small></span></label>
             <label class="facet-choice"><input type="radio" name="scope" value="capitals" aria-label="National capitals"><span><strong>National capitals</strong><small>Named capitals and their country relationships</small></span></label>
             <label class="facet-choice"><input type="radio" name="scope" value="cities" aria-label="Major cities"><span><strong>Major cities</strong><small>A curated worldwide set, including capitals</small></span></label>
+            <label class="facet-choice"><input type="radio" name="scope" value="water" aria-label="Water features"><span><strong>Water features</strong><small>${waterFeatures.length} curated rivers, lakes, seas and oceans</small></span></label>
           </section>
           <section data-page="2" hidden>
             <h2 tabindex="-1">Where shall we go?</h2>
@@ -29,9 +31,10 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
             <div class="facet-geography">
               <label>Continent<select name="continent"></select></label>
               <label>Region<select name="region"></select></label>
+              <label><span class="facet-country-label">Country or territory</span><select name="countryId" aria-label="Country relationship"></select></label>
             </div>
             <p class="facet-coverage" aria-live="polite"></p>
-            <p class="facet-note">Groups follow each place’s Natural Earth region, including transcontinental countries. Open ocean includes territories outside the continental groups.</p>
+            <p class="facet-note facet-geography-note"></p>
           </section>
           <section data-page="3" hidden>
             <h2 tabindex="-1">What would you like to learn?</h2>
@@ -63,12 +66,16 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
   document.body.append(dialog);
   const continent = dialog.querySelector<HTMLSelectElement>('[name="continent"]')!;
   const region = dialog.querySelector<HTMLSelectElement>('[name="region"]')!;
+  const country = dialog.querySelector<HTMLSelectElement>('[name="countryId"]')!;
   const start = dialog.querySelector<HTMLButtonElement>('[data-action="start"]')!;
   const next = dialog.querySelector<HTMLButtonElement>('[data-action="continue"]')!;
   const back = dialog.querySelector<HTMLButtonElement>('[data-action="back"]')!;
   let draft = defaultFacets();
   let step = 1;
   continent.replaceChildren(...Object.keys(continentRegions).map(name => new Option(name, name)));
+  country.replaceChildren(new Option('All countries & territories', ''), ...[...countries]
+    .sort((a, b) => a.properties.name.localeCompare(b.properties.name))
+    .map(feature => new Option(feature.properties.name, feature.properties.id)));
 
   function renderRegions() {
     region.replaceChildren(...['All regions', ...continentRegions[draft.continent]].map(name => new Option(name, name)));
@@ -81,7 +88,7 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
     });
     dialog.querySelector('#facet-step-count')!.textContent = `step ${step} of 3`;
     const count = practiceCandidateCount(draft);
-    const coverage = `${count} ${draft.scope === 'countries' ? 'countries & territories' : draft.scope === 'capitals' ? 'national capitals' : 'cities'}${count ? '' : ' · choose another region'}`;
+    const coverage = `${count} ${draft.scope === 'countries' ? 'countries & territories' : draft.scope === 'capitals' ? 'national capitals' : draft.scope === 'water' ? 'water features' : 'cities'}${count ? '' : ' · choose another geographic filter'}`;
     start.disabled = count === 0;
     dialog.querySelectorAll<HTMLInputElement>('[name="learning"]').forEach(input => {
       const allowed = input.value === 'name-to-location'
@@ -93,6 +100,11 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
     });
     dialog.querySelector('.facet-coverage')!.textContent = coverage;
     dialog.querySelector('.facet-plan-count')!.textContent = coverage;
+    country.value = draft.countryId ?? '';
+    dialog.querySelector('.facet-country-label')!.textContent = draft.scope === 'water' ? 'Crossing or bordering country' : 'Country or territory';
+    dialog.querySelector('.facet-geography-note')!.textContent = draft.scope === 'water'
+      ? 'Matches any crossing or bordering country and any related region, not one owning country. Relationships and this water-feature catalogue are curated, not exhaustive. Oceans use generalized named basin extents; Southern Ocean has no country in this catalogue.'
+      : 'Groups follow each place’s Natural Earth region, including transcontinental countries. Open ocean includes territories outside the continental groups.';
     dialog.querySelector('.facet-plan-selection')!.textContent = describeFacets(draft);
     dialog.querySelector('.facet-plan em')!.textContent = `${draft.continent === 'Worldwide' ? 'the world' : draft.continent}.`;
     back.hidden = step === 1;
@@ -113,6 +125,10 @@ export function createFacetSetup(onStart: (selection: FacetSelection) => void) {
       renderRegions();
     }
     if (input.name === 'region') draft.region = region.value;
+    if (input.name === 'countryId') {
+      if (country.value) draft.countryId = country.value;
+      else delete draft.countryId;
+    }
     if (input.name === 'learning') draft.learning = input.value as FacetSelection['learning'];
     render();
   });

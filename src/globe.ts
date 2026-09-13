@@ -2,10 +2,19 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { countries, polygonArea, type Country } from './geography';
 import { CityGlobeSurface } from './city-globe-surface';
+import type { WaterFeature } from './water';
 
 type Point = { longitude: number; latitude: number };
 type Answer = Point & { correct: boolean };
 type CityTarget = Point & { toleranceKm: number };
+type WaterAtlas = {
+  feature: WaterFeature;
+  path: Path2D;
+  bounds: THREE.Box2[];
+  fill: boolean;
+  center: THREE.Vector3;
+  radius: number;
+};
 const radians = Math.PI / 180;
 const earthRadiusKm = 6371.0088;
 const cityMinimumDistance = 1.0008;
@@ -18,6 +27,114 @@ function position(point: Point, radius = 1): THREE.Vector3 {
 
 function geographic(point: THREE.Vector3): Point {
   return { longitude: Math.atan2(point.x, point.z) / radians, latitude: Math.asin(THREE.MathUtils.clamp(point.y / point.length(), -1, 1)) / radians };
+}
+
+function createWaterAtlas(feature: WaterFeature, width: number, height: number): WaterAtlas {
+  const geometry = feature.geometry;
+  const fill = geometry.type === 'Polygon' || geometry.type === 'MultiPolygon';
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates]
+    : geometry.type === 'MultiPolygon' ? geometry.coordinates
+    : geometry.type === 'LineString' ? [[geometry.coordinates]] : geometry.coordinates.map(line => [line]);
+  const scale = width / 360;
+  const path = new Path2D();
+  const bounds: THREE.Box2[] = [];
+  const center = new THREE.Vector3();
+  const vertex = new THREE.Vector3();
+  const previous = new THREE.Vector3();
+  const pixel = new THREE.Vector2();
+  const segment = new THREE.Vector3();
+  for (const polygon of polygons) {
+    const part = new Path2D();
+    const extent = new THREE.Box2();
+    let exteriorLongitude = 0;
+    for (let ringIndex = 0; ringIndex < polygon.length; ringIndex++) {
+      const ring = polygon[ringIndex];
+      if (!ring.length) continue;
+      let longitude = ring[0][0];
+      // Polygon coordinates are already split at the antimeridian in the
+      // versioned content. Preserve their full extent, especially polar ocean
+      // closures; shortest-arc unwrapping would invert broad ocean regions.
+      // Rivers may cross the seam and take the short longitudinal interval.
+      const coordinates = ring.map(([rawLongitude, latitude], index) => {
+        if (index) {
+          const delta = rawLongitude - ring[index - 1][0];
+          longitude = fill ? rawLongitude : longitude + ((delta + 540) % 360) - 180;
+        }
+        return [longitude, latitude];
+      });
+      let minimum = Infinity;
+      let maximum = -Infinity;
+      for (const coordinate of coordinates) {
+        minimum = Math.min(minimum, coordinate[0]);
+        maximum = Math.max(maximum, coordinate[0]);
+      }
+      const middle = (minimum + maximum) / 2;
+      const shift = ringIndex ? Math.round((exteriorLongitude - middle) / 360) * 360 : 0;
+      if (!ringIndex) exteriorLongitude = middle;
+      let area = 0;
+      let centerLongitude = 0;
+      let centerLatitude = 0;
+      for (let index = 0; index < coordinates.length; index++) {
+        const [longitude, latitude] = coordinates[index];
+        const x = (longitude + shift + 180) * scale;
+        const y = (90 - latitude) * scale;
+        if (index) part.lineTo(x, y);
+        else part.moveTo(x, y);
+        extent.expandByPoint(pixel.set(x, y));
+        vertex.setFromSphericalCoords(1, (90 - latitude) * radians, (longitude + shift) * radians);
+        if (!fill && index) {
+          const weight = previous.angleTo(vertex);
+          segment.copy(previous).add(vertex).normalize();
+          center.addScaledVector(segment, weight);
+        }
+        previous.copy(vertex);
+        if (fill) {
+          const next = coordinates[(index + 1) % coordinates.length];
+          const cross = (longitude + shift) * next[1] - (next[0] + shift) * latitude;
+          area += cross;
+          centerLongitude += (longitude + next[0] + 2 * shift) * cross;
+          centerLatitude += (latitude + next[1]) * cross;
+        }
+      }
+      if (fill) {
+        part.closePath();
+        if (Math.abs(area) > 1e-12) {
+          const latitude = centerLatitude / (3 * area);
+          const weight = Math.abs(area) * Math.cos(latitude * radians) * (ringIndex ? -1 : 1);
+          center.addScaledVector(position({ longitude: centerLongitude / (3 * area), latitude }), weight);
+        }
+      }
+    }
+    if (extent.isEmpty()) continue;
+    // Repeat only the pieces touching the longitude seam. The texture's sphere
+    // projection supplies curvature and occlusion, including polygon holes;
+    // there are no planar triangles or long 3D chords through the Earth.
+    const first = Math.ceil(-extent.max.x / width);
+    const last = Math.floor((width - extent.min.x) / width);
+    for (let shift = first; shift <= last; shift++) {
+      path.addPath(part, new DOMMatrix().translate(shift * width, 0));
+      const region = extent.clone().translate(new THREE.Vector2(shift * width, 0));
+      region.min.floor().subScalar(16).max(new THREE.Vector2());
+      region.max.ceil().addScalar(16).min(new THREE.Vector2(width, height));
+      if (!region.isEmpty()) bounds.push(region);
+    }
+  }
+  if (center.lengthSq() < 1e-12) {
+    const first = polygons[0]?.[0]?.[0];
+    if (first) center.setFromSphericalCoords(1, (90 - first[1]) * radians, first[0] * radians);
+    else center.set(0, 0, 1);
+  }
+  center.normalize();
+  let radius = 0;
+  for (const polygon of polygons) {
+    for (const ring of polygon) {
+      for (const [longitude, latitude] of ring) {
+        vertex.setFromSphericalCoords(1, (90 - latitude) * radians, longitude * radians);
+        radius = Math.max(radius, center.angleTo(vertex));
+      }
+    }
+  }
+  return { feature, path, bounds, fill, center, radius };
 }
 
 // Only geographic coordinates cross this presentation boundary. Evaluation,
@@ -33,6 +150,9 @@ export class Globe {
   private readonly texture: THREE.CanvasTexture;
   private readonly patchTexture = new THREE.Texture(document.createElement('canvas'));
   private readonly atlasPolygons: { country: Country; path: Path2D; bounds: THREE.Box2 }[] = [];
+  private waterFeatures: readonly WaterFeature[] = [];
+  private readonly waterAtlas: WaterAtlas[] = [];
+  private waterTarget?: WaterAtlas;
   private textureUploaded = false;
   private readonly surface: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
   private readonly pinTexture: THREE.CanvasTexture;
@@ -419,18 +539,44 @@ export class Globe {
       context.fill(path, 'evenodd');
       context.stroke(path);
     }
+    for (const water of this.waterAtlas) {
+      if (region && !water.bounds.some(bounds => region.intersectsBox(bounds))) continue;
+      this.paintWater(context, water, false);
+    }
+    if (this.waterTarget && (!region || this.waterTarget.bounds.some(bounds => region.intersectsBox(bounds)))) {
+      this.paintWater(context, this.waterTarget, true);
+    }
+    context.lineJoin = 'miter';
+    context.lineCap = 'butt';
+  }
+
+  private paintWater(context: CanvasRenderingContext2D, water: WaterAtlas, highlighted: boolean) {
+    context.fillStyle = highlighted ? '#72cbea' : '#28586d';
+    context.strokeStyle = highlighted ? '#e3f5b1' : '#78cce9';
+    context.lineWidth = highlighted ? 3 : 2;
+    context.lineJoin = 'round';
+    context.lineCap = 'round';
+    if (water.fill) context.fill(water.path, 'evenodd');
+    context.stroke(water.path);
   }
 
   private updateHighlight(previous?: Country) {
+    const changed: THREE.Box2[] = [];
+    for (const polygon of this.atlasPolygons) {
+      if (polygon.country === previous || polygon.country === this.highlighted) changed.push(polygon.bounds);
+    }
+    this.updateAtlas(changed);
+  }
+
+  private updateAtlas(changedBounds: readonly THREE.Box2[]) {
     if (!this.textureUploaded) {
       this.paint(this.texture.image.getContext('2d')!);
       this.texture.needsUpdate = true;
       return;
     }
     const regions: THREE.Box2[] = [];
-    for (const polygon of this.atlasPolygons) {
-      if (polygon.country !== previous && polygon.country !== this.highlighted) continue;
-      const bounds = polygon.bounds.clone();
+    for (const changed of changedBounds) {
+      const bounds = changed.clone();
       // Coalesce overlapping islands before uploading. Keep disjoint regions
       // separate, especially on opposite sides of the longitude seam.
       for (let index = 0; index < regions.length; index++) {
@@ -524,9 +670,52 @@ export class Globe {
     this.render();
   }
 
+  setWaterFeatures(features: readonly WaterFeature[]): void {
+    if (this.disposed || (features.length === this.waterFeatures.length &&
+      features.every((feature, index) => feature === this.waterFeatures[index]))) return;
+    this.stopMotion();
+    if (features.length) this.setCityPractice(false);
+    this.waterFeatures = features;
+    this.waterTarget = undefined;
+    this.waterAtlas.length = 0;
+    if (features.length) this.highlighted = undefined;
+    const canvas = this.texture.image as HTMLCanvasElement;
+    // Put rivers and lakes over broad ocean/sea extents. This immutable atlas
+    // is prepared only when the dataset changes, never on every question.
+    for (const kind of ['ocean', 'sea', 'lake', 'river'] as const) {
+      for (const feature of features) {
+        if (feature.properties.kind === kind) this.waterAtlas.push(createWaterAtlas(feature, canvas.width, canvas.height));
+      }
+    }
+    this.paint(canvas.getContext('2d')!);
+    this.texture.needsUpdate = true;
+    this.render();
+  }
+
+  setWaterTarget(feature: WaterFeature | null, reveal: boolean): void {
+    if (this.disposed) return;
+    const target = reveal && feature
+      ? this.waterAtlas.find(water => water.feature.properties.id === feature.properties.id) : undefined;
+    if (target === this.waterTarget) return;
+    const previous = this.waterTarget;
+    this.waterTarget = target;
+    this.updateAtlas([...(previous?.bounds ?? []), ...(target?.bounds ?? [])]);
+    if (target) this.focusWaterTarget();
+    this.render();
+  }
+
+  focusWaterTarget(): void {
+    const target = this.waterTarget;
+    if (this.disposed || !target) return;
+    const fieldOfView = Math.atan(Math.tan(this.camera.fov * radians / 2) * Math.min(1, this.camera.aspect));
+    const altitude = THREE.MathUtils.clamp(target.radius * 1.3 / Math.tan(fieldOfView), 0.15, 2);
+    this.moveTo(target.center.clone().multiplyScalar(1 + altitude));
+  }
+
   setCityPractice(enabled: boolean): void {
     if (this.disposed || enabled === this.cityPractice) return;
     this.stopMotion();
+    if (enabled) this.setWaterFeatures([]);
     this.cityPractice = enabled;
     this.controls.minDistance = enabled ? cityMinimumDistance : 1.15;
     // Even the closest city camera remains well outside both the unit sphere
@@ -607,6 +796,7 @@ export class Globe {
   }
 
   showAnswer(country?: Country, answer?: Answer) {
+    if (this.waterFeatures.length) country = undefined;
     if (answer) this.stopMotion();
     if (country !== this.highlighted) {
       const previous = this.highlighted;
@@ -656,6 +846,9 @@ export class Globe {
     this.cityRing.material.dispose();
     this.texture.dispose();
     this.patchTexture.dispose();
+    this.waterAtlas.length = 0;
+    this.waterFeatures = [];
+    this.waterTarget = undefined;
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

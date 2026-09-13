@@ -4,6 +4,7 @@ import './style.css';
 import { countries, type Country } from './geography';
 import { factVersion, getCountryFacts } from './facts';
 import { cityToleranceKm, getCityFacts } from './cities';
+import { getWaterFacts, waterFeatures, waterToleranceKm, type WaterFeature } from './water';
 import { cityImageryUrlTemplate, cityImageryAttribution, cityImageryMinZoom, cityImageryMaxZoom, cityImageryBounds, cityOverviewUrlTemplate, cityOverviewMaxZoom, cityOverviewAttribution } from './city-imagery';
 import { Accounts } from './accounts';
 import { createAccountProfile } from './account-profile';
@@ -120,6 +121,7 @@ app.innerHTML = `
       <button type="button" data-scope="countries" data-learning="name-to-location"><strong>Countries & territories</strong><small>Find a country within its boundaries</small></button>
       <button type="button" data-scope="capitals" data-learning="name-to-location"><strong>National capitals</strong><small>Find a named capital within ${cityToleranceKm} km</small></button>
       <button type="button" data-scope="cities" data-learning="name-to-location"><strong>Major cities</strong><small>A curated worldwide set, including capitals</small></button>
+      <button type="button" data-scope="water" data-learning="name-to-location"><strong>Rivers, lakes & oceans</strong><small>Find rivers, lakes, seas and oceans on the default map</small></button>
       <button type="button" data-scope="capitals" data-learning="capital-to-location"><strong>Capital relationships</strong><small>Given a country, locate its capital</small></button>
     </div>
   </dialog>
@@ -200,7 +202,7 @@ const countryResults = document.querySelector<HTMLElement>('#country-results')!;
 const searchSummary = document.querySelector<HTMLElement>('#search-summary')!;
 let marker: MapPin | undefined;
 let answerPolygon: L.Polygon | undefined;
-let linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
+let linkedOpen = session.assisted && !session.recognizingLocation && !session.city && !session.water;
 let globe: Globe | undefined;
 let globeOpen = false;
 const globeContainer = document.querySelector<HTMLElement>('#globe')!;
@@ -332,6 +334,12 @@ map.attributionControl.addAttribution('Natural Earth · Public domain');
 const boundaryStyle: L.PolylineOptions = { smoothFactor: 0, color: '#63777f', weight: 0.8, fillColor: '#334c57', fillOpacity: 1 };
 const boundaries = L.geoJSON(countries, { style: boundaryStyle }).addTo(map);
 const linkedMaps = new LinkedMaps(map, detailMapContainer, selectPoint);
+const waterStyle: L.StyleFunction = feature => ({
+  smoothFactor: 0, color: '#73b9d6', weight: feature?.properties.kind === 'river' ? 2 : 1,
+  fillColor: '#326b87', fillOpacity: 1,
+});
+const waterLayers = L.geoJSON(undefined, { style: waterStyle, interactive: false });
+let waterAnswerBounds: L.LatLngBounds | undefined;
 const cityMarks = L.layerGroup().addTo(map);
 const cityRenderer = L.svg({ padding: 0.5 });
 let cityAnswerBounds: L.LatLngBounds | undefined;
@@ -405,7 +413,7 @@ map.on('move zoom resize', drawGrid);
 drawGrid();
 
 function focusAnswer(animate = true) {
-  const bounds = cityAnswerBounds ?? answerPolygon?.getBounds();
+  const bounds = waterAnswerBounds ?? cityAnswerBounds ?? answerPolygon?.getBounds();
   if (!bounds || linkedOpen || globeOpen || session.feedback?.correct) return;
   const canvas = map.getContainer().getBoundingClientRect();
   const overlay = panel.getBoundingClientRect();
@@ -421,16 +429,25 @@ map.on('resize', () => focusAnswer(false));
 
 const populationFormatter = new Intl.NumberFormat('en');
 
-function renderFactCard(countryId: string, version: string, cityId?: string, attemptId?: string) {
+function renderFactCard(countryId: string | undefined, version: string, cityId?: string, attemptId?: string, waterId?: string) {
+  const waterFacts = waterId ? getWaterFacts(waterId, version) : undefined;
   const cityFacts = cityId ? getCityFacts(cityId, version) : undefined;
-  const countryFacts = cityId ? undefined : getCountryFacts(countryId, version);
-  const release = (cityFacts ?? countryFacts)!;
+  const countryFacts = countryId && !cityId && !waterId ? getCountryFacts(countryId, version) : undefined;
+  const release = (waterFacts ?? cityFacts ?? countryFacts)!;
   const heading = document.createElement('h2');
-  heading.textContent = cityFacts?.city.name ?? countryFacts!.facts.name;
-  factCard.setAttribute('aria-label', cityFacts ? 'City fact card' : 'Country fact card');
+  heading.textContent = waterFacts?.water.name ?? cityFacts?.city.name ?? countryFacts!.facts.name;
+  factCard.setAttribute('aria-label', waterFacts ? 'Water feature fact card' : cityFacts ? 'City fact card' : 'Country fact card');
   const fields = document.createElement('dl');
   let entries: string[][];
-  if (cityFacts) {
+  if (waterFacts) {
+    const water = waterFacts.water;
+    entries = [
+      ['Water feature', water.kind],
+      ['Country relationships', water.countryIds.map(id => countries.find(country => country.properties.id === id)!.properties.name).join(', ') || 'Open ocean'],
+      ['Regions', water.regions.join(', ')],
+      ['Highlight', water.highlight],
+    ];
+  } else if (cityFacts) {
     const city = cityFacts.city;
     entries = [
       ['Relationship', city.relationship],
@@ -467,7 +484,7 @@ function renderFactCard(countryId: string, version: string, cityId?: string, att
   const scope = document.createElement('p');
   scope.textContent = `Geographic scope: ${release.geographicScope}`;
   const referenceYear = document.createElement('p');
-  referenceYear.textContent = `${cityFacts ? 'Reference year' : 'Population reference year'}: ${release.referenceYear ?? 'Unavailable; the sources do not state a reference year.'}`;
+  referenceYear.textContent = `${cityFacts || waterFacts ? 'Reference year' : 'Population reference year'}: ${release.referenceYear ?? 'Unavailable; the sources do not state a reference year.'}`;
   const reviewed = document.createElement('p');
   const reviewDate = document.createElement('time');
   reviewDate.dateTime = release.reviewedAt;
@@ -493,7 +510,7 @@ function renderFactCard(countryId: string, version: string, cityId?: string, att
   factCard.replaceChildren(heading, informational, fields, versionLabel, details);
   factCard.hidden = false;
   factCard.scrollTop = 0;
-  session.recordFactPresentation(countryId, version, cityId, attemptId);
+  session.recordFactPresentation(countryId, version, cityId, attemptId, waterId);
 }
 
 function renderQuestion(animate = true) {
@@ -502,8 +519,23 @@ function renderQuestion(animate = true) {
   answerPolygon = undefined;
   cityMarks.clearLayers();
   cityAnswerBounds = undefined;
+  waterAnswerBounds = undefined;
+  const water = session.water;
+  if (water && !map.hasLayer(waterLayers)) {
+    if (!waterLayers.getLayers().length) {
+      for (const kind of ['ocean', 'sea', 'lake', 'river'] as const) {
+        for (const feature of waterFeatures) {
+          if (feature.properties.kind === kind) waterLayers.addData(feature);
+        }
+      }
+    }
+    waterLayers.addTo(map);
+  } else if (!water) waterLayers.remove();
+  waterLayers.resetStyle();
+  // Restore the base order after a previous answer brought its target forward.
+  waterLayers.eachLayer(layer => (layer as L.Path).bringToFront());
   const city = session.city;
-  if (city) linkedOpen = false;
+  if (city || water) linkedOpen = false;
   app.classList.toggle('has-city', !!city);
   map.setMaxZoom(city ? 14 : 10);
   if (city && !map.hasLayer(cityImagery)) {
@@ -517,11 +549,13 @@ function renderQuestion(animate = true) {
   }
   if (!city || globeOpen) imageryNotice.hidden = true;
   globe?.setCityPractice(!!city);
+  globe?.setWaterFeatures(water ? waterFeatures : []);
+  if (!water) globe?.setWaterTarget(null, false);
   globeContainer.querySelector('.globe-attribution')!.innerHTML = city
     ? `Natural Earth · ${cityOverviewAttribution} · ${cityImageryAttribution}` : 'Natural Earth · Public domain';
   const capitalRelationship = session.skill === 'capital-to-location';
   document.querySelector('#current-quiz')!.textContent = capitalRelationship ? 'Capital relationships'
-    : session.selection?.scope === 'capitals' ? 'National capitals' : city ? 'Major cities' : 'Countries & territories';
+    : water ? 'Rivers, lakes & oceans' : session.selection?.scope === 'capitals' ? 'National capitals' : city ? 'Major cities' : 'Countries & territories';
   const reading = session.readingFacts;
   const recognition = session.recognizingLocation;
   app.classList.toggle('is-recognizing', recognition);
@@ -556,13 +590,13 @@ function renderQuestion(animate = true) {
   document.querySelector<HTMLElement>('#overview-label')!.hidden = !showLinked;
   map.getContainer().setAttribute('aria-label', showLinked ? 'Regional overview' : 'World map');
   if (!showLinked) linkedMaps.hide();
-  document.querySelector<HTMLElement>('#session')!.hidden = !session.started || !country;
+  document.querySelector<HTMLElement>('#session')!.hidden = !session.started || (!country && !water);
   document.querySelector('#session > .prompt')!.textContent = capitalRelationship
     ? `Where is the ${(city?.capitalRole ?? 'capital').replace(/^national capital$/i, 'capital').toLowerCase()} of`
     : shape ? 'Which country is' : recognition ? 'What is' : 'Where is';
   countryName.replaceChildren();
   const heading = shape ? 'this shape' : recognition && !answer ? 'this country'
-    : city && !capitalRelationship ? city.name : country?.properties.name;
+    : water ? water.properties.name : city && !capitalRelationship ? city.name : country?.properties.name;
   for (const word of heading?.split(' ') ?? []) {
     if (countryName.firstChild) countryName.append(' ');
     const part = document.createElement('span');
@@ -570,8 +604,10 @@ function renderQuestion(animate = true) {
     countryName.append(part);
   }
   const cityInstructions = document.querySelector<HTMLElement>('#city-instructions')!;
-  cityInstructions.hidden = !city || !!answer;
-  cityInstructions.textContent = `Place your pin within ${cityToleranceKm} km of the city centre. Zoom in for finer satellite detail.`;
+  cityInstructions.hidden = (!city && !water) || !!answer;
+  cityInstructions.textContent = water
+    ? `Place your pin ${water.properties.kind === 'river' ? 'on the river line' : 'inside the filled water area'}. A ${waterToleranceKm} km tolerance applies. Blue features are shown without labels.`
+    : `Place your pin within ${cityToleranceKm} km of the city centre. Zoom in for finer satellite detail.`;
   document.querySelector('#question-kind')!.textContent = reading ? 'Country fact cards' : session.questionKind ? questionLabels[session.questionKind] : '';
   document.querySelector('#question-number')!.textContent = reading ? 'Reading' : `Q. ${String(session.cursor + 1).padStart(2, '0')}`;
   document.querySelector('#answered-count')!.textContent = String(session.attempts.length);
@@ -606,7 +642,7 @@ function renderQuestion(animate = true) {
     : 'Immediate retry records practice, not retention; your review time stays unchanged.';
   document.querySelector('#practice-note')!.textContent = shape
     ? 'Practice revisit cannot earn retention. Repeated misses schedule an earlier recheck.'
-    : `Practice revisit reinforces this ${city ? 'city' : 'country'} without changing retention proficiency or its scheduled review.`;
+    : `Practice revisit reinforces this ${water ? 'water feature' : city ? 'city' : 'country'} without changing retention proficiency or its scheduled review.`;
   check.hidden = !!answer || reading;
   check.disabled = true;
   check.firstChild!.textContent = shape ? 'Check answer ' : recognition ? 'Check country ' : 'Check location ';
@@ -616,7 +652,7 @@ function renderQuestion(animate = true) {
   countrySearch.value = '';
   closeCountryResults();
   searchSummary.textContent = '';
-  const skillLabel = city && !capitalRelationship ? 'City name-to-location' : learningLabels[session.skill];
+  const skillLabel = water ? 'Water name-to-location' : city && !capitalRelationship ? 'City name-to-location' : learningLabels[session.skill];
   proficiency.setAttribute('aria-label', `${skillLabel} proficiency`);
   document.querySelector('#proficiency-skill')!.textContent = skillLabel;
   const itemProficiency = session.proficiency;
@@ -632,25 +668,27 @@ function renderQuestion(animate = true) {
     renderFactCard(country.properties.id, factVersion);
   } else if (!answer) {
     feedback.textContent = '';
-  } else if (country) {
+  } else if (country || water) {
     feedback.className = `feedback ${answer.correct ? 'correct' : 'incorrect'}`;
-    renderFactCard(country.properties.id, answer.factVersion, city?.id, answer.id);
+    renderFactCard(country?.properties.id, answer.factVersion, city?.id, answer.id, water?.properties.id);
     const result = document.createElement('strong');
     result.textContent = answer.assisted
       ? answer.correct ? 'Correct — guided practice.' : 'Not quite — guided practice.'
       : answer.correct ? shape ? 'Correct — recognized.' : recognition ? 'Correct — country identified.' : 'Correct — well placed.' : 'Not quite — take another look.';
     const explanation = document.createElement('span');
-    explanation.textContent = city
+    explanation.textContent = water
+      ? `${water.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${Math.round(answer.distanceKm!)} km from the mapped ${water.properties.kind === 'river' ? 'river line' : 'water area'}. Accepted distance: ${answer.toleranceKm} km.`
+      : city
       ? `${city.name} · ${Math.round(answer.distanceKm!)} km from the city centre. Accepted distance: ${answer.toleranceKm} km. Green dot: centre; ring: accepted area.`
       : shape
-      ? `This is ${country.properties.name}. ${answer.correct ? 'You identified the country.' : `You selected ${answer.selectedCountry}.`}`
-      : `${country.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${recognition
+      ? `This is ${country!.properties.name}. ${answer.correct ? 'You identified the country.' : `You selected ${answer.selectedCountry}.`}`
+      : `${country!.properties.name} is highlighted on the ${globeOpen ? 'globe' : 'map'}. ${recognition
         ? `You selected ${answer.selectedCountry}.`
         : answer.correct ? 'Your selection is within the accepted geographic tolerance.'
           : answer.selectedCountry ? `You selected ${answer.selectedCountry}.` : 'Your selection is outside the accepted geographic tolerance.'}`;
     feedback.replaceChildren(result, explanation);
     // Siachen Glacier is a disputed geographic area without its own country flag.
-    if (country.properties.id !== 'KAS') {
+    if (country && country.properties.id !== 'KAS') {
       const flag = document.createElement('img');
       flag.className = 'country-flag';
       flag.src = new URL(`./flags/${country.properties.id}.svg`, document.baseURI).href;
@@ -670,6 +708,24 @@ function renderQuestion(animate = true) {
   if (!showLinked) map.invalidateSize({ pan: false, animate: false });
   const pointAnswer = answer?.longitude !== undefined && answer.latitude !== undefined
     ? { longitude: answer.longitude, latitude: answer.latitude, correct: answer.correct } : undefined;
+  if (water) {
+    globe?.showCityAnswer(undefined);
+    globe?.showAnswer(undefined, pointAnswer);
+    globe?.setWaterTarget(water, session.assisted || !!answer);
+    if (answer || session.assisted) {
+      waterLayers.eachLayer(layer => {
+        const featureLayer = layer as L.Polyline<WaterFeature['geometry'], WaterFeature['properties']>;
+        const feature = featureLayer.feature!;
+        if (feature.properties.id !== water.properties.id) return;
+        featureLayer.setStyle({ color: '#d6ef87', weight: water.properties.kind === 'river' ? 4 : 2, fillColor: '#70a99d' });
+        featureLayer.bringToFront();
+        waterAnswerBounds = featureLayer.getBounds();
+      });
+      if (pointAnswer) marker = new MapPin(map, [pointAnswer.latitude, pointAnswer.longitude], pointAnswer.correct);
+      if (!globeOpen) focusAnswer(animate);
+    } else resetWorld(animate);
+    return;
+  }
   if (city) {
     globe?.showAnswer();
     const revealed = !!answer || session.assisted;
@@ -712,7 +768,7 @@ function highlightCountry(countryId: string) {
 }
 
 function selectPoint(point: L.LatLng) {
-  if (!session.started || session.readingFacts || session.recognizingLocation || session.recognizingShape || !session.country || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
+  if (!session.started || session.readingFacts || session.recognizingLocation || session.recognizingShape || (!session.country && !session.water) || session.feedback || Math.abs(point.lng) > 180 || Math.abs(point.lat) > 90) return;
   pendingPoint = point;
   globe?.setSelection({ longitude: point.lng, latitude: point.lat });
   if (!linkedOpen && !globeOpen) {
@@ -820,21 +876,22 @@ check.addEventListener('click', () => {
 });
 next.addEventListener('click', () => {
   session.next();
-  linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
+  linkedOpen = session.assisted && !session.recognizingLocation && !session.city && !session.water;
   renderQuestion();
   if (session.recognizingShape) countrySearch.focus();
   if (globeOpen && !session.recognizingLocation) globe?.reset();
 });
 retry.addEventListener('click', () => {
   session.retry();
-  linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
+  linkedOpen = session.assisted && !session.recognizingLocation && !session.city && !session.water;
   renderQuestion();
   if (session.recognizingShape) countrySearch.focus();
 });
 document.querySelector('#location-help')!.addEventListener('click', () => {
   session.requestLocationHelp();
-  linkedOpen = !session.city;
+  linkedOpen = !session.city && !session.water;
   renderQuestion();
+  if (session.water && globeOpen) globe?.focusWaterTarget();
 });
 document.querySelector('#close-linked')!.addEventListener('click', () => {
   linkedOpen = false;
@@ -922,7 +979,7 @@ quizChooser.addEventListener('click', event => {
     if (scope === (session.selection?.scope ?? 'countries')
       && (learning === 'capital-to-location') === (session.skill === 'capital-to-location')) return;
     session.choosePractice(scope === 'countries' ? null : { ...defaultFacets(), scope, learning });
-    linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
+    linkedOpen = session.assisted && !session.recognizingLocation && !session.city && !session.water;
     renderQuestion();
     if (globeOpen) globe?.reset();
     return;
@@ -936,7 +993,7 @@ window.addEventListener('scroll', positionQuizChooser, true);
 
 const facetSetup = createFacetSetup(selection => {
   session.choosePractice(selection);
-  linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
+  linkedOpen = session.assisted && !session.recognizingLocation && !session.city && !session.water;
   renderQuestion();
 });
 document.querySelector('#facet-mode')!.addEventListener('click', () => facetSetup.open(session.selection));
@@ -944,7 +1001,7 @@ document.querySelector('#edit-facets')!.addEventListener('click', () => facetSet
 document.querySelector('#adaptive-mode')!.addEventListener('click', () => {
   if (!session.selection) return;
   session.choosePractice(null);
-  linkedOpen = session.assisted && !session.recognizingLocation && !session.city;
+  linkedOpen = session.assisted && !session.recognizingLocation && !session.city && !session.water;
   renderQuestion();
 });
 const renderAccountProfile = createAccountProfile(accounts);
